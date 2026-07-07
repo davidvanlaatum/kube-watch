@@ -33,6 +33,7 @@ var supportedResources = map[string]schema.GroupVersionResource{
 	"services":    {Group: "", Version: "v1", Resource: "services"},
 	"jobs":        {Group: "batch", Version: "v1", Resource: "jobs"},
 	"cronjobs":    {Group: "batch", Version: "v1", Resource: "cronjobs"},
+	"hpas":        {Group: "autoscaling", Version: "v2", Resource: "horizontalpodautoscalers"},
 	"configmaps":  {Group: "", Version: "v1", Resource: "configmaps"},
 	"secrets":     {Group: "", Version: "v1", Resource: "secrets"},
 	"events":      {Group: "", Version: "v1", Resource: "events"},

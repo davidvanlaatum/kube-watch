@@ -10,13 +10,14 @@ type Column = {
   align?: 'left' | 'center' | 'right'
 }
 
-const eventSupportedResources = new Set(['pods', 'deployments', 'services', 'jobs', 'cronjobs', 'configmaps', 'secrets'])
+const eventSupportedResources = new Set(['pods', 'deployments', 'services', 'jobs', 'cronjobs', 'hpas', 'configmaps', 'secrets'])
 const resourceKinds: Record<string, string> = {
   pods: 'Pod',
   deployments: 'Deployment',
   services: 'Service',
   jobs: 'Job',
   cronjobs: 'CronJob',
+  hpas: 'HorizontalPodAutoscaler',
   configmaps: 'ConfigMap',
   secrets: 'Secret',
 }
@@ -59,6 +60,15 @@ const columnsByResource: Record<string, Column[]> = {
     { header: 'SUSPEND', value: (o) => String(Boolean(o.spec?.suspend)), align: 'center' },
     { header: 'ACTIVE', value: (o) => o.status?.active?.length || 0, align: 'right' },
     { header: 'LAST SCHEDULE', value: lastSchedule, align: 'right' },
+    { header: 'AGE', value: age, align: 'right' },
+  ],
+  hpas: [
+    { header: 'NAME', value: name },
+    { header: 'REFERENCE', value: hpaReference },
+    { header: 'TARGETS', value: hpaTargets },
+    { header: 'MINPODS', value: (o) => o.spec?.minReplicas ?? 1, align: 'right' },
+    { header: 'MAXPODS', value: (o) => o.spec?.maxReplicas ?? '', align: 'right' },
+    { header: 'REPLICAS', value: (o) => o.status?.currentReplicas ?? 0, align: 'right' },
     { header: 'AGE', value: age, align: 'right' },
   ],
   configmaps: [
@@ -143,6 +153,50 @@ function jobStatus(o: any) {
   if (o.status?.failed) return 'Failed'
   if (o.status?.active) return 'Running'
   return ''
+}
+
+function hpaReference(o: any) {
+  const ref = o.spec?.scaleTargetRef
+  if (!ref) return '<none>'
+  return `${ref.kind || ''}/${ref.name || ''}`
+}
+
+function hpaTargets(o: any) {
+  const metrics = o.spec?.metrics || []
+  const currentMetrics = o.status?.currentMetrics || []
+  if (metrics.length === 0) return '<unknown>'
+
+  return metrics.map((metric: any, index: number) => {
+    const current = currentMetrics[index]
+    if (metric.type === 'Resource') {
+      const resourceName = metric.resource?.name || 'resource'
+      return `${metricCurrentValue(current?.resource)}/${metricTargetValue(metric.resource?.target)} ${resourceName}`
+    }
+    if (metric.type === 'Pods') {
+      return `${metricCurrentValue(current?.pods)}/${metricTargetValue(metric.pods?.target)} pods`
+    }
+    if (metric.type === 'Object') {
+      return `${metricCurrentValue(current?.object)}/${metricTargetValue(metric.object?.target)} object`
+    }
+    if (metric.type === 'External') {
+      return `${metricCurrentValue(current?.external)}/${metricTargetValue(metric.external?.target)} external`
+    }
+    return `<unknown>/${metric.type || 'unknown'}`
+  }).join(', ')
+}
+
+function metricCurrentValue(metric?: any) {
+  return metric?.current?.averageUtilization ??
+    metric?.current?.averageValue ??
+    metric?.current?.value ??
+    '<unknown>'
+}
+
+function metricTargetValue(target?: any) {
+  return target?.averageUtilization ??
+    target?.averageValue ??
+    target?.value ??
+    '<unknown>'
 }
 
 function formatDurationSince(timestamp?: string) {
@@ -375,6 +429,7 @@ export default function App() {
             <option value="services">services</option>
             <option value="jobs">jobs</option>
             <option value="cronjobs">cronjobs</option>
+            <option value="hpas">hpas</option>
             <option value="configmaps">configmaps</option>
             <option value="secrets">secrets</option>
             <option value="events">events</option>
