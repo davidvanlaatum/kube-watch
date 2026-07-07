@@ -9,6 +9,9 @@
   --control-border: #d1d5db;
   --row-border: #e5e7eb;
   --row-hover: #f9fafb;
+  --row-selected: #dbeafe;
+  --panel-background: #f8fafc;
+  --panel-border: #cbd5e1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,6 +26,9 @@
     --control-border: #475569;
     --row-border: #334155;
     --row-hover: #1e293b;
+    --row-selected: #1d4ed8;
+    --panel-background: #020617;
+    --panel-border: #334155;
   }
 }
 
@@ -49,9 +55,49 @@ header h1 { margin: 0; font-size: 18px }
   border: 1px solid var(--control-border);
 }
 main { padding: 12px }
+main.has-details { padding-bottom: 42vh }
+.resource-table { overflow: auto }
 table { width: 100%; border-collapse: collapse }
 th, td { padding: 8px; border-bottom: 1px solid var(--row-border) }
 th { text-align: left }
 .align-center { text-align: center }
 .align-right { text-align: right }
+tbody tr { cursor: pointer }
 tr:hover { background: var(--row-hover) }
+tr.selected { background: var(--row-selected) }
+.details-panel {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  z-index: 10;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-background);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 24%);
+}
+.details-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--panel-border);
+}
+.details-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.details-panel button {
+  background: var(--control-background);
+  color: var(--control-foreground);
+  border: 1px solid var(--control-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+.details-panel pre {
+  margin: 0;
+  padding: 12px;
+  max-height: 32vh;
+  overflow: auto;
+  user-select: text;
+}

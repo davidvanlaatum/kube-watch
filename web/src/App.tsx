@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react'
+import { stringify } from 'yaml'
 
 type ContextInfo = { name: string; namespace: string }
 type Envelope = { type: string; object: any }
@@ -157,11 +158,17 @@ function alignClass(column: Column) {
   return column.align ? `align-${column.align}` : undefined
 }
 
+function objectKey(object: any) {
+  const md = object.metadata || {}
+  return md.uid || `${md.name}/${md.namespace || ''}`
+}
+
 export default function App() {
   const [contexts, setContexts] = useState<ContextInfo[]>([])
   const [ctx, setCtx] = useState<string>('')
   const [resource, setResource] = useState<string>('pods')
   const [items, setItems] = useState<Map<string, any>>(new Map())
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
 
   useEffect(() => {
@@ -176,27 +183,27 @@ export default function App() {
       esRef.current = null
     }
     setItems(new Map())
+    setSelectedKey(null)
     const url = `/sse/${encodeURIComponent(ctx)}/${encodeURIComponent(resource)}`
     const es = new EventSource(url)
     es.onmessage = (ev) => {
       try {
         const env: Envelope = JSON.parse(ev.data)
         if (env.type === 'ADDED' || env.type === 'MODIFIED') {
-          const md = env.object.metadata || {}
-          const uid = md.uid || (md.name + '/' + (md.namespace||''))
+          const uid = objectKey(env.object)
           setItems(prev => {
             const next = new Map(prev)
             next.set(uid, env.object)
             return next
           })
         } else if (env.type === 'DELETED') {
-          const md = env.object.metadata || {}
-          const uid = md.uid || (md.name + '/' + (md.namespace||''))
+          const uid = objectKey(env.object)
           setItems(prev => {
             const next = new Map(prev)
             next.delete(uid)
             return next
           })
+          setSelectedKey(prev => prev === uid ? null : prev)
         } else if (env.error) {
           console.warn('sse error', env)
         }
@@ -218,6 +225,7 @@ export default function App() {
   const sortedItems = [...items.values()].sort((a: any, b: any) =>
     (a.metadata?.name || '').localeCompare(b.metadata?.name || '')
   )
+  const selectedItem = selectedKey ? items.get(selectedKey) : null
 
   return (
     <div className="app">
@@ -240,25 +248,39 @@ export default function App() {
           </select>
         </div>
       </header>
-      <main>
-        <table>
-          <thead>
-            <tr>
-              {columns.map(column => <th key={column.header} className={alignClass(column)}>{column.header}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {sortedItems.map((o:any) => {
-              const md = o.metadata || {}
-              const key = md.uid || (md.name + '/' + (md.namespace||''))
-              return (
-                <tr key={key}>
-                  {columns.map(column => <td key={column.header} className={alignClass(column)}>{column.value(o)}</td>)}
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+      <main className={selectedItem ? 'has-details' : undefined}>
+        <section className="resource-table">
+          <table>
+            <thead>
+              <tr>
+                {columns.map(column => <th key={column.header} className={alignClass(column)}>{column.header}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {sortedItems.map((o:any) => {
+                const key = objectKey(o)
+                return (
+                  <tr
+                    key={key}
+                    className={selectedKey === key ? 'selected' : undefined}
+                    onClick={() => setSelectedKey(prev => prev === key ? null : key)}
+                  >
+                    {columns.map(column => <td key={column.header} className={alignClass(column)}>{column.value(o)}</td>)}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </section>
+        {selectedItem && (
+          <section className="details-panel" aria-label="Selected resource details">
+            <div className="details-header">
+              <h2>{selectedItem.kind || resource}/{selectedItem.metadata?.name || selectedKey}</h2>
+              <button type="button" onClick={() => setSelectedKey(null)}>Close</button>
+            </div>
+            <pre>{stringify(selectedItem)}</pre>
+          </section>
+        )}
       </main>
     </div>
   )
