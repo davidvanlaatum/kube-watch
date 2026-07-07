@@ -12,6 +12,12 @@
   --row-selected: #dbeafe;
   --panel-background: #f8fafc;
   --panel-border: #cbd5e1;
+  --banner-background: #eff6ff;
+  --banner-border: #bfdbfe;
+  --banner-foreground: #1e3a8a;
+  --error-background: #fef2f2;
+  --error-border: #fecaca;
+  --error-foreground: #991b1b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -29,6 +35,12 @@
     --row-selected: #1d4ed8;
     --panel-background: #020617;
     --panel-border: #334155;
+    --banner-background: #172554;
+    --banner-border: #1d4ed8;
+    --banner-foreground: #dbeafe;
+    --error-background: #450a0a;
+    --error-border: #991b1b;
+    --error-foreground: #fecaca;
   }
 }
 
@@ -56,6 +68,37 @@ header h1 { margin: 0; font-size: 18px }
 }
 main { padding: 12px }
 main.has-details { padding-bottom: 42vh }
+.loading-banner,
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid;
+  border-radius: 6px;
+}
+.loading-banner {
+  background: var(--banner-background);
+  border-color: var(--banner-border);
+  color: var(--banner-foreground);
+}
+.error-banner {
+  background: var(--error-background);
+  border-color: var(--error-border);
+  color: var(--error-foreground);
+}
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 .resource-table { overflow: auto }
 table { width: 100%; border-collapse: collapse }
 th, td { padding: 8px; border-bottom: 1px solid var(--row-border) }

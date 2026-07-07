@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react'
 import { stringify } from 'yaml'
 
 type ContextInfo = { name: string; namespace: string }
-type Envelope = { type: string; object: any }
+type Envelope = { type?: string; object?: any; error?: string; info?: string }
 type Column = {
   header: string
   value: (object: any) => React.ReactNode
@@ -169,6 +169,8 @@ export default function App() {
   const [resource, setResource] = useState<string>('pods')
   const [items, setItems] = useState<Map<string, any>>(new Map())
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
 
   useEffect(() => {
@@ -184,6 +186,8 @@ export default function App() {
     }
     setItems(new Map())
     setSelectedKey(null)
+    setIsLoading(true)
+    setLoadError(null)
     const url = `/sse/${encodeURIComponent(ctx)}/${encodeURIComponent(resource)}`
     const es = new EventSource(url)
     es.onmessage = (ev) => {
@@ -204,7 +208,12 @@ export default function App() {
             return next
           })
           setSelectedKey(prev => prev === uid ? null : prev)
+        } else if (env.type === 'SYNCED') {
+          setIsLoading(false)
+          setLoadError(null)
         } else if (env.error) {
+          setIsLoading(false)
+          setLoadError(env.error)
           console.warn('sse error', env)
         }
       } catch (e) {
@@ -212,6 +221,7 @@ export default function App() {
       }
     }
     es.onerror = (e) => {
+      setLoadError('Connection interrupted; waiting for EventSource to reconnect')
       console.warn('sse error', e)
     }
     esRef.current = es
@@ -249,6 +259,13 @@ export default function App() {
         </div>
       </header>
       <main className={selectedItem ? 'has-details' : undefined}>
+        {isLoading && (
+          <div className="loading-banner" role="status">
+            <span className="spinner" aria-hidden="true" />
+            Loading {resource}...
+          </div>
+        )}
+        {loadError && !isLoading && <div className="error-banner">{loadError}</div>}
         <section className="resource-table">
           <table>
             <thead>

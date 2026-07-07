@@ -38,6 +38,8 @@ type watchEntry struct {
 	idle    *time.Timer
 }
 
+var syncedEvent = []byte(`{"type":"SYNCED"}`)
+
 func NewWatchManager(kubeconfigPath string) *WatchManager {
 	return &WatchManager{kubeconfigPath: kubeconfigPath, entries: make(map[string]*watchEntry)}
 }
@@ -126,6 +128,10 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 			default:
 			}
 		}
+		select {
+		case ch <- syncedEvent:
+		default:
+		}
 	}()
 
 	unsubscribe := func() {
@@ -172,6 +178,7 @@ func (e *watchEntry) run(kubeconfigPath string) {
 				b, _ := json.Marshal(map[string]interface{}{"type": "ADDED", "object": item.Object})
 				e.broadcast(b)
 			}
+			e.broadcast(syncedEvent)
 		} else {
 			log.Printf("[%s][%s][%s] namespaced initial list failed: %v", e.cluster, e.namespace, e.gvr.Resource, err)
 			// notify clients of list error and backoff
@@ -297,6 +304,7 @@ func (e *watchEntry) runNamespaced(ns string) error {
 				b, _ := json.Marshal(map[string]interface{}{"type": "ADDED", "object": item.Object})
 				e.broadcast(b)
 			}
+			e.broadcast(syncedEvent)
 		} else {
 			log.Printf("[%s][%s] namespaced list %s failed: %v", e.cluster, e.gvr.Resource, ns, err)
 			e.broadcast([]byte(fmt.Sprintf(`{"error":"namespaced list %s failed: %s"}`, ns, err.Error())))
