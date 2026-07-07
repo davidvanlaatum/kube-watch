@@ -36,6 +36,8 @@ type watchEntry struct {
 	stopCh  chan struct{}
 	mu      sync.Mutex
 	idle    *time.Timer
+
+	terminalError []byte
 }
 
 var syncedEvent = []byte(`{"type":"SYNCED"}`)
@@ -119,6 +121,7 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 	for _, v := range e.cache {
 		cacheSnapshot = append(cacheSnapshot, v)
 	}
+	terminalError := e.terminalError
 	e.mu.Unlock()
 	go func() {
 		// send cached entries (non-blocking per item)
@@ -127,6 +130,13 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 			case ch <- v:
 			default:
 			}
+		}
+		if terminalError != nil {
+			select {
+			case ch <- terminalError:
+			default:
+			}
+			return
 		}
 		select {
 		case ch <- syncedEvent:
@@ -181,8 +191,13 @@ func (e *watchEntry) run(kubeconfigPath string) {
 			e.broadcast(syncedEvent)
 		} else {
 			log.Printf("[%s][%s][%s] namespaced initial list failed: %v", e.cluster, e.namespace, e.gvr.Resource, err)
-			// notify clients of list error and backoff
-			e.broadcast([]byte(fmt.Sprintf(`{"error":"namespaced initial list failed: %s"}`, err.Error())))
+			msg := errorEvent("namespaced initial list failed", err)
+			if errors.IsForbidden(err) {
+				e.setTerminalError(msg)
+				e.broadcast(msg)
+				return
+			}
+			e.broadcast(msg)
 			select {
 			case <-time.After(3 * time.Second):
 			case <-e.stopCh:
@@ -201,23 +216,27 @@ func (e *watchEntry) run(kubeconfigPath string) {
 			// log and broadcast error to clients with details
 			if errors.IsForbidden(err) {
 				log.Printf("[%s][%s][%s] namespaced watch start forbidden (rv=%s): %v", e.cluster, e.namespace, e.gvr.Resource, opts.ResourceVersion, err)
-				e.broadcast([]byte(fmt.Sprintf(`{"error":"namespaced watch forbidden: %s"}`, err.Error())))
+				msg := errorEvent("namespaced watch forbidden", err)
+				e.setTerminalError(msg)
+				e.broadcast(msg)
+				cancel()
+				return
 			} else {
 				if se, ok := err.(errors.APIStatus); ok {
 					st := se.Status()
 					// if resourceVersion is too old, clear lastRV to force a fresh list before retry
 					if st.Code == 410 || st.Reason == metav1.StatusReasonExpired {
 						log.Printf("[%s][%s][%s] namespaced watch start returned 410/Expired (rv=%s): %s; will re-list", e.cluster, e.namespace, e.gvr.Resource, opts.ResourceVersion, st.Message)
-						e.broadcast([]byte(fmt.Sprintf(`{"error":"namespaced watch resourceVersion expired: %s; re-listing"}`, st.Message)))
+						e.broadcast(errorMessage("namespaced watch resourceVersion expired: " + st.Message + "; re-listing"))
 						// reset lastRV to force a full re-list on next loop
 						e.lastRV = ""
 					} else {
 						log.Printf("[%s][%s][%s] namespaced watch start failed (rv=%s): %s", e.cluster, e.namespace, e.gvr.Resource, opts.ResourceVersion, st.Message)
-						e.broadcast([]byte(fmt.Sprintf(`{"error":"namespaced watch failed: %s"}`, st.Message)))
+						e.broadcast(errorMessage("namespaced watch failed: " + st.Message))
 					}
 				} else {
 					log.Printf("[%s][%s][%s] namespaced watch start failed (rv=%s): %v", e.cluster, e.namespace, e.gvr.Resource, opts.ResourceVersion, err)
-					e.broadcast([]byte(fmt.Sprintf(`{"error":"namespaced watch failed: %s"}`, err.Error())))
+					e.broadcast(errorEvent("namespaced watch failed", err))
 				}
 			}
 			cancel()
@@ -254,7 +273,7 @@ func (e *watchEntry) run(kubeconfigPath string) {
 						st := se.Status()
 						if st.Code == 410 || st.Reason == metav1.StatusReasonExpired {
 							log.Printf("[%s][%s][%s] received watch ERROR 410/Expired: %s; will re-list", e.cluster, e.namespace, e.gvr.Resource, st.Message)
-							e.broadcast([]byte(fmt.Sprintf(`{"error":"watch resourceVersion expired: %s; re-listing"}`, st.Message)))
+							e.broadcast(errorMessage("watch resourceVersion expired: " + st.Message + "; re-listing"))
 							// clear lastRV to force a fresh list on next iteration
 							e.lastRV = ""
 							// stop watcher and recreate by breaking out of loop
@@ -307,7 +326,7 @@ func (e *watchEntry) runNamespaced(ns string) error {
 			e.broadcast(syncedEvent)
 		} else {
 			log.Printf("[%s][%s] namespaced list %s failed: %v", e.cluster, e.gvr.Resource, ns, err)
-			e.broadcast([]byte(fmt.Sprintf(`{"error":"namespaced list %s failed: %s"}`, ns, err.Error())))
+			e.broadcast(errorEvent(fmt.Sprintf("namespaced list %s failed", ns), err))
 			// if this namespace is forbidden, return error so caller can try others
 			return err
 		}
@@ -317,7 +336,7 @@ func (e *watchEntry) runNamespaced(ns string) error {
 		watcher, err := res.Namespace(ns).Watch(ctx, opts)
 		if err != nil {
 			log.Printf("[%s][%s] namespaced watch %s failed: %v", e.cluster, e.gvr.Resource, ns, err)
-			e.broadcast([]byte(fmt.Sprintf(`{"error":"namespaced watch %s failed: %s"}`, ns, err.Error())))
+			e.broadcast(errorEvent(fmt.Sprintf("namespaced watch %s failed", ns), err))
 			cancel()
 			select {
 			case <-time.After(3 * time.Second):
@@ -346,7 +365,7 @@ func (e *watchEntry) runNamespaced(ns string) error {
 						st := se.Status()
 						if st.Code == 410 || st.Reason == metav1.StatusReasonExpired {
 							log.Printf("[%s][%s] received watch ERROR 410/Expired for %s: %s; will re-list", e.cluster, ns, e.gvr.Resource, st.Message)
-							e.broadcast([]byte(fmt.Sprintf(`{"error":"watch resourceVersion expired for %s: %s; re-listing"}`, ns, st.Message)))
+							e.broadcast(errorMessage(fmt.Sprintf("watch resourceVersion expired for %s: %s; re-listing", ns, st.Message)))
 							e.lastRV = ""
 							w := watcher
 							w.Stop()
@@ -395,6 +414,24 @@ func (e *watchEntry) runNamespacedMultiple(names []string) error {
 	<-e.stopCh
 	wg.Wait()
 	return nil
+}
+
+func (e *watchEntry) setTerminalError(msg []byte) {
+	e.mu.Lock()
+	e.terminalError = msg
+	e.mu.Unlock()
+}
+
+func errorEvent(prefix string, err error) []byte {
+	return errorMessage(prefix + ": " + err.Error())
+}
+
+func errorMessage(message string) []byte {
+	b, err := json.Marshal(map[string]string{"error": message})
+	if err != nil {
+		return []byte(`{"error":"failed to encode error message"}`)
+	}
+	return b
 }
 
 func (e *watchEntry) broadcast(msg []byte) {
