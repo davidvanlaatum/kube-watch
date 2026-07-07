@@ -8,8 +8,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const GO_BACKEND = process.env.GO_BACKEND || 'https://localhost:9443';
 
-// serve static UI
-app.use(express.static(path.join(__dirname, 'static')));
+// serve static UI (prefer built dist if available)
+const distPath = path.join(__dirname, 'dist')
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath))
+} else {
+  app.use(express.static(path.join(__dirname, 'static')))
+}
 
 // proxy API calls to Go backend (preserves SSE)
 app.use('/api', createProxyMiddleware({

@@ -4,7 +4,9 @@
   "private": true,
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "cd src && vite",
+    "build-frontend": "cd src && vite build --outDir ../dist"
   },
   "dependencies": {
     "express": "^4.18.2",
