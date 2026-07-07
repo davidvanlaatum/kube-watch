@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -167,7 +168,12 @@ func main() {
 
 func listContexts(cfg *api.Config, kubeconfigPath string) []map[string]string {
 	out := make([]map[string]string, 0, len(cfg.Contexts))
+	names := make([]string, 0, len(cfg.Contexts))
 	for k := range cfg.Contexts {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
 		// attempt to read the namespace for this context
 		rules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath}
 		overrides := &clientcmd.ConfigOverrides{CurrentContext: k}
