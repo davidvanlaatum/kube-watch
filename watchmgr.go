@@ -8,14 +8,14 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
+
 // WatchManager manages shared watches per cluster+resource and broadcasts events to subscribers.
 type WatchManager struct {
 	kubeconfigPath string
@@ -82,11 +82,22 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 		ch := make(chan []byte, 256)
 		e.mu.Lock()
 		e.clients[ch] = struct{}{}
-		if e.idle != nil { _ = e.idle.Stop(); e.idle = nil }
+		if e.idle != nil {
+			_ = e.idle.Stop()
+			e.idle = nil
+		}
 		e.mu.Unlock()
 		go e.run(m.kubeconfigPath)
 		// return subscription
-		unsubscribe := func() { e.mu.Lock(); delete(e.clients, ch); close(ch); if len(e.clients)==0 { e.idle = time.AfterFunc(30*time.Second, func(){ e.stop()}) }; e.mu.Unlock() }
+		unsubscribe := func() {
+			e.mu.Lock()
+			delete(e.clients, ch)
+			close(ch)
+			if len(e.clients) == 0 {
+				e.idle = time.AfterFunc(30*time.Second, func() { e.stop() })
+			}
+			e.mu.Unlock()
+		}
 		return ch, unsubscribe, nil
 	} else {
 		m.mu.Unlock()
@@ -131,13 +142,6 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 	}
 
 	return ch, unsubscribe, nil
-}
-
-func (m *WatchManager) buildConfigForCluster(cluster string) (*rest.Config, error) {
-	rules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: m.kubeconfigPath}
-	overrides := &clientcmd.ConfigOverrides{CurrentContext: cluster}
-	clientCfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
-	return clientCfg.ClientConfig()
 }
 
 func (e *watchEntry) stop() {
@@ -366,7 +370,9 @@ func (e *watchEntry) runNamespaced(ns string) error {
 // runNamespacedMultiple runs watches for multiple namespaces concurrently
 func (e *watchEntry) runNamespacedMultiple(names []string) error {
 	// limit to first 10
-	if len(names) > 10 { names = names[:10] }
+	if len(names) > 10 {
+		names = names[:10]
+	}
 	log.Printf("[%s][%s] starting namespaced watchers for: %v", e.cluster, e.gvr.Resource, names)
 	var wg sync.WaitGroup
 	for _, ns := range names {

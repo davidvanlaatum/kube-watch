@@ -14,7 +14,7 @@ Primary Objectives
 3. Add robust 410 Gone handling, CLI flags (port, log-level, persist-cache), and tests (Playwright + unit tests) as requested.
 
 What agents may do
-- Modify code under /go and /web to fix bugs and add features per the project plan.
+- Modify Go code in the repository root and frontend code under /web to fix bugs and add features per the project plan.
 - Run local builds, linters, and targeted tests. Use existing npm/go test scripts; do not add new global tools unnecessarily.
 - Create or update documentation (README.md, PLAN.md, AGENT_INSTRUCTIONS.md).
 
@@ -24,13 +24,13 @@ What agents must not do
 - Make destructive infra changes or publish Docker images without explicit approval.
 
 Runbook (dev/test)
-- Start backend: cd go && go run .
-- Start frontend (dev): cd web && npm install && npm run dev (or node server.js)
-- Use FORCE_HTTP=true for headless/Playwright tests when TLS is unavailable.
+- Start backend: go run .
+- Start frontend (dev): cd web && npm install && npm run dev
+- Use the Vite dev server for browser/headless testing; it proxies API/SSE requests to the Go backend.
 - Check logs: go server stdout and web/server logs; tail them for debugging.
 
 Testing guidance
-- Add a Playwright test that runs with FORCE_HTTP and validates: initial snapshot delivered, ADDED/MODIFIED/DELETED flow, reconnect behavior.
+- Add a Playwright test that uses the Vite dev server and validates: initial snapshot delivered, ADDED/MODIFIED/DELETED flow, reconnect behavior.
 - Keep tests targeted and fast.
 
 Escalation & Questions

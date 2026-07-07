@@ -1,0 +1,2 @@
+This file keeps the embedded frontend directory present before the Vite
+production build has been generated.

@@ -6,8 +6,9 @@ playwright/
 # ignore node modules (web)
 web/node_modules/
 node_modules/
+web/dist/*
+!web/dist/placeholder.txt
 # ignore local dev certs and logs
 certs/
 *.log
-go/certs/
-go/kube-watch
+kube-watch

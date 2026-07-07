@@ -29,9 +29,9 @@ Architecture
     - /sse/{context}/{resource} => SSE event stream (ADDED/MODIFIED/DELETED + info/error messages)
   - TLS: self-signed certs in ./certs for local HTTPS; Node frontend can be forced to HTTP for testing.
 
-- Frontend (Node + static)
-  - Express static server + http-proxy-middleware that proxies /api and /sse to Go backend.
-  - web/static/app.js: EventSource client, in-memory map by object UID, sorted rendering, status bar and details pane.
+- Frontend (Vite + React + TypeScript)
+  - Vite dev server proxies /api and /sse to Go backend.
+  - Production build outputs to web/dist and is embedded in the Go binary.
 
 Key design decisions
 
@@ -44,7 +44,7 @@ Key design decisions
 Current status (2026-07-07)
 
 - Implemented: context discovery, namespaced list+watch, SSE endpoint, shared WatchManager, in-memory snapshot cache, frontend UI and proxy.
-- Working: contexts listing, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, FORCE_HTTP convenience for Playwright/local testing.
+- Working: contexts listing, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, Vite dev proxy for local testing.
 - Known limitations:
   - Snapshot is memory-only (lost on restart).
   - 410 Gone handling (resourceVersion too old) should trigger explicit re-list before re-watching — partial retry logic exists but re-list on 410 is not yet robust.
@@ -81,25 +81,24 @@ Agent / Operator instructions (runbook)
 - Local development (interactive)
   1. Ensure tools: go (1.20+), node/npm, kubectl, (gcloud if using GKE contexts)
   2. Start backend (prefer interactive):
-     cd go
      go mod tidy
      go run .
      # Logs will print to stdout; use this for debugging exec plugin failures and watch errors.
-  3. Start frontend (HTTP mode for local testing):
+  3. Start frontend dev server:
      cd web
      npm install
-     FORCE_HTTP=1 npm start
-  4. Open UI: http://localhost:3000
+     npm run dev
+  4. Open UI: http://localhost:5173
   5. For GKE contexts: run `gcloud auth login` before starting backend if your kubeconfig uses gke-gcloud-auth-plugin.
 
 - Headless testing (Playwright)
   - Force HTTP and set GO_BACKEND if needed:
-    FORCE_HTTP=1 GO_BACKEND=http://localhost:9443 npm start
+    GO_BACKEND=http://localhost:9443 npm run dev
   - Ensure backend is reachable from the Playwright runner and gcloud credentials are available if using GKE.
 
 - Debugging tips
   - If SSE stream shows {"error":"namespaced initial list failed: ... exec plugin failed"}: run `gcloud auth login` and restart the backend.
-  - To inspect server logs: run backend interactively (go run .) or tail ../go_server.log if started with nohup.
+  - To inspect server logs: run backend interactively (go run .) or tail the log file if started with nohup.
   - If events stop: check watchmgr logs for "watch channel closed" or 410 errors; re-list logic may be needed.
 
 Contributing / PR checklist
@@ -125,5 +124,3 @@ Contact / ownership
 
 - Repository owner: local developer (you)
 - For changes requested to this plan, update PLAN.md (this file) and open a short PR describing the change.
-
-

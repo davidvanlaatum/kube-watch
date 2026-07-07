@@ -1,15 +1,16 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"embed"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io/fs"
 	"log"
 	"math/big"
 	"net/http"
@@ -18,13 +19,13 @@ import (
 	"strings"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 )
+
+//go:embed web/dist
+var embeddedDist embed.FS
 
 var supportedResources = map[string]schema.GroupVersionResource{
 	"pods":        {Group: "", Version: "v1", Resource: "pods"},
@@ -66,11 +67,30 @@ func main() {
 		}
 	}
 
-
 	// instantiate watch manager
 	wm := NewWatchManager(kubeconfig)
 
 	mux := http.NewServeMux()
+	distFS, err := fs.Sub(embeddedDist, "web/dist")
+	if err != nil {
+		log.Fatalf("failed to load embedded frontend: %v", err)
+	}
+	fileServer := http.FileServer(http.FS(distFS))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/")
+		if p == "" || p == "/" {
+			http.ServeFileFS(w, r, distFS, "index.html")
+			return
+		}
+		if f, err := distFS.Open(p); err != nil {
+			http.ServeFileFS(w, r, distFS, "index.html")
+			return
+		} else {
+			f.Close()
+			fileServer.ServeHTTP(w, r)
+		}
+	})
+
 	mux.HandleFunc("/api/contexts", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(contexts)
@@ -118,7 +138,9 @@ func main() {
 			case <-notify:
 				return
 			case b, ok := <-ch:
-				if !ok { return }
+				if !ok {
+					return
+				}
 				fmt.Fprintf(w, "data: %s\n\n", b)
 				flusher.Flush()
 			}
@@ -153,18 +175,6 @@ func listContexts(cfg *api.Config, kubeconfigPath string) []map[string]string {
 	return out
 }
 
-// small wrapper that actually builds a rest.Config for a named context
-func getRestConfigForContext(kubeconfigPath string, contextName string) (*rest.Config, error) {
-	rules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath}
-	overrides := &clientcmd.ConfigOverrides{CurrentContext: contextName}
-	clientCfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
-	cfg, err := clientCfg.ClientConfig()
-	if err != nil {
-		return nil, err
-	}
-	return cfg, nil
-}
-
 // generate a minimal self-signed cert for localhost
 func generateSelfSignedCert(certPath, keyPath string) error {
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -179,10 +189,10 @@ func generateSelfSignedCert(certPath, keyPath string) error {
 		Subject: pkix.Name{
 			Organization: []string{"kube-watch"},
 		},
-		NotBefore: now.Add(-time.Hour),
-		NotAfter:  now.AddDate(1, 0, 0),
-		DNSNames:  []string{"localhost"},
-		KeyUsage:  x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		NotBefore:   now.Add(-time.Hour),
+		NotAfter:    now.AddDate(1, 0, 0),
+		DNSNames:    []string{"localhost"},
+		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
 
@@ -219,64 +229,4 @@ func cors(h http.Handler) http.Handler {
 		}
 		h.ServeHTTP(w, r)
 	})
-}
-
-// serveSSEWatch opens a watch and streams events as SSE to the http.ResponseWriter
-func serveSSEWatch(ctx context.Context, w http.ResponseWriter, dyn dynamic.Interface, gvr schema.GroupVersionResource) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	// simple list then watch pattern — list first to get current state
-	res := dyn.Resource(gvr)
-	list, err := res.List(ctx, metav1.ListOptions{})
-	if err == nil {
-		for _, item := range list.Items {
-			b, _ := json.Marshal(map[string]interface{}{"type": "ADDED", "object": item.Object})
-			fmt.Fprintf(w, "data: %s\n\n", b)
-		}
-		flusher.Flush()
-	}
-
-	// start watch
-	opts := metav1.ListOptions{Watch: true}
-	watcher, err := res.Watch(ctx, opts)
-	if err != nil {
-		fmt.Fprintf(w, "data: %s\n\n", []byte("{\"error\":\"watch failed\"}"))
-		flusher.Flush()
-		return
-	}
-
-	ch := watcher.ResultChan()
-	for {
-		select {
-		case <-ctx.Done():
-			watcher.Stop()
-			return
-		case ev, ok := <-ch:
-			if !ok {
-				// watcher closed; attempt to re-establish after short delay
-				fmt.Fprintf(w, "data: %s\n\n", []byte("{\"info\":\"watch closed, reconnecting\"}"))
-				flusher.Flush()
-				time.Sleep(2 * time.Second)
-				watcher, err = res.Watch(ctx, opts)
-				if err != nil {
-					fmt.Fprintf(w, "data: %s\n\n", []byte("{\"error\":\"re-watch failed\"}"))
-					flusher.Flush()
-					return
-				}
-				ch = watcher.ResultChan()
-				continue
-			}
-			b, _ := json.Marshal(map[string]interface{}{"type": ev.Type, "object": ev.Object})
-			fmt.Fprintf(w, "data: %s\n\n", b)
-			flusher.Flush()
-		}
-	}
 }

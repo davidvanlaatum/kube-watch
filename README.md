@@ -8,16 +8,21 @@ Quick start (local)
 1. Ensure kubectl and gcloud (if using GKE) are installed and kubeconfig has contexts that can authenticate (gke-gcloud-auth-plugin supported by client-go exec plugin).
 
 2. Start Go backend (it will generate self-signed certs in ./certs):
-   cd go
    go mod tidy
    go run .
 
-3. In another shell, start Node frontend:
+3. In another shell, start the Vite dev server:
    cd web
    npm install
-   npm start
+   npm run dev
 
-4. Open https://localhost:3000 (or http://localhost:3000 if certs missing). The frontend will proxy API and SSE to the Go backend at https://localhost:9443.
+4. Open http://localhost:5173. Vite will proxy API and SSE to the Go backend at https://localhost:9443.
+
+Production build:
+   cd web
+   npm run build
+   cd ..
+   go build -o kube-watch .
 
 Notes & next steps
 - Current implementation is a prototype: watches use dynamic client and basic list-then-watch logic with in-memory resume.
@@ -25,7 +30,7 @@ Notes & next steps
 - Improvements: add informer factories, backpressure, per-resource rate limiting, more robust reconnection with resourceVersion resumption and 410 handling, authentication fallback, UI filters.
 
 Troubleshooting & operational notes
-- Logs: run the backend interactively with `go run .` to see logs on stdout (recommended). If started with nohup the backend writes `../go_server.log` and the frontend writes `../web_server.log`.
+- Logs: run the backend interactively with `go run .` to see logs on stdout (recommended). If started with nohup, write logs to a local `*.log` file.
 
 - gke / gcloud auth: contexts that use `gke-gcloud-auth-plugin` require `gcloud` credentials accessible to the Go process. Run `gcloud auth login` (interactive) before starting the backend so the exec plugin can obtain tokens.
 
@@ -35,16 +40,14 @@ Troubleshooting & operational notes
 
 Agent / operator instructions
 - Start backend interactively:
-  cd go
   go mod tidy
   go run .
 
-- Start frontend for local testing (HTTP to avoid self-signed cert prompts):
+- Start frontend for local testing:
   cd web
   npm install
-  FORCE_HTTP=1 npm start
+  npm run dev
 
 - To run headless tests (Playwright) use HTTP and ensure GO_BACKEND points to your backend if needed.
 
 If you'd like, I can add CLI flags for log level, snapshot persistence, or multi-namespace selection next.
-

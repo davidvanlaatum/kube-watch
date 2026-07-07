@@ -9,17 +9,17 @@ Key rules
 - When in doubt, ask the user one focused question.
 
 Startup checklist for changes requiring runtime validation
-1. Run `go run .` in /go and confirm backend exposes /api/contexts and /sse endpoints.
-2. Run `node server.js` in /web (or npm run dev) and open frontend (FORCE_HTTP=true for tests).
-3. Confirm Playwright test (if present) passes with FORCE_HTTP.
+1. Run `go run .` in the repository root and confirm backend exposes /api/contexts and /sse endpoints.
+2. Run `npm run dev` in /web and open the frontend.
+3. Confirm Playwright test (if present) passes against the Vite dev server.
 
 Error handling
 - Log and surface the exact APIStatus or error message from Kubernetes watches.
 - On watch closure, implement exponential backoff and re-list when encountering 410 Gone.
 
 Files of interest
-- go/watchmgr.go — shared watches, snapshot cache, resume logic
-- web/static/app.js — SSE handling and UI
+- watchmgr.go — shared watches, snapshot cache, resume logic
+- web/src/App.tsx — SSE handling and UI
 - PLAN.md / README.md — runbook and design decisions
 
 When creating PRs
