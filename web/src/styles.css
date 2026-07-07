@@ -6,4 +6,7 @@ header h1 { margin: 0; font-size: 18px }
 main { padding: 12px }
 table { width: 100%; border-collapse: collapse }
 th, td { padding: 8px; border-bottom: 1px solid #e5e7eb }
+th { text-align: left }
+.align-center { text-align: center }
+.align-right { text-align: right }
 tr:hover { background: #f9fafb }
