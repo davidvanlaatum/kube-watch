@@ -9,3 +9,4 @@ node_modules/
 # ignore local dev certs and logs
 certs/
 *.log
+go/certs/
