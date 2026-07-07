@@ -194,6 +194,8 @@ export default function App() {
       try {
         const env: Envelope = JSON.parse(ev.data)
         if (env.type === 'ADDED' || env.type === 'MODIFIED') {
+          setIsLoading(false)
+          setLoadError(null)
           const uid = objectKey(env.object)
           setItems(prev => {
             const next = new Map(prev)
@@ -201,6 +203,8 @@ export default function App() {
             return next
           })
         } else if (env.type === 'DELETED') {
+          setIsLoading(false)
+          setLoadError(null)
           const uid = objectKey(env.object)
           setItems(prev => {
             const next = new Map(prev)
@@ -232,9 +236,7 @@ export default function App() {
   }, [ctx, resource])
 
   const columns = columnsByResource[resource] || columnsByResource.pods
-  const sortedItems = [...items.values()].sort((a: any, b: any) =>
-    (a.metadata?.name || '').localeCompare(b.metadata?.name || '')
-  )
+  const sortedItems = sortItems(resource, [...items.values()])
   const selectedItem = selectedKey ? items.get(selectedKey) : null
 
   return (
@@ -301,4 +303,16 @@ export default function App() {
       </main>
     </div>
   )
+}
+
+function sortItems(resource: string, values: any[]) {
+  if (resource === 'events') {
+    return values.sort((a, b) => eventTimestamp(b) - eventTimestamp(a))
+  }
+  return values.sort((a, b) => (a.metadata?.name || '').localeCompare(b.metadata?.name || ''))
+}
+
+function eventTimestamp(o: any) {
+  const timestamp = o.lastTimestamp || o.eventTime || o.metadata?.creationTimestamp
+  return timestamp ? new Date(timestamp).getTime() : 0
 }
