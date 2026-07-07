@@ -1,0 +1,11 @@
+# ignore editor/test artifacts
+.idea/
+.playwright-mcp/
+.playwright/
+playwright/
+# ignore node modules (web)
+web/node_modules/
+node_modules/
+# ignore local dev certs and logs
+certs/
+*.log
