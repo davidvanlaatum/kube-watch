@@ -10,3 +10,4 @@ node_modules/
 certs/
 *.log
 go/certs/
+go/kube-watch
