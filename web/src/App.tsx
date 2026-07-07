@@ -163,12 +163,31 @@ function objectKey(object: any) {
   return md.uid || `${md.name}/${md.namespace || ''}`
 }
 
+function cleanKubernetesObject(object: any) {
+  const copy = structuredClone(object)
+  if (copy.metadata) {
+    delete copy.metadata.managedFields
+    delete copy.metadata.resourceVersion
+    delete copy.metadata.uid
+    delete copy.metadata.selfLink
+    if (copy.metadata.annotations) {
+      delete copy.metadata.annotations['kubectl.kubernetes.io/last-applied-configuration']
+      delete copy.metadata.annotations['deployment.kubernetes.io/revision']
+      if (Object.keys(copy.metadata.annotations).length === 0) {
+        delete copy.metadata.annotations
+      }
+    }
+  }
+  return copy
+}
+
 export default function App() {
   const [contexts, setContexts] = useState<ContextInfo[]>([])
   const [ctx, setCtx] = useState<string>('')
   const [resource, setResource] = useState<string>('pods')
   const [items, setItems] = useState<Map<string, any>>(new Map())
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [showFullDetails, setShowFullDetails] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
@@ -186,6 +205,7 @@ export default function App() {
     }
     setItems(new Map())
     setSelectedKey(null)
+    setShowFullDetails(false)
     setIsLoading(true)
     setLoadError(null)
     const url = `/sse/${encodeURIComponent(ctx)}/${encodeURIComponent(resource)}`
@@ -211,7 +231,13 @@ export default function App() {
             next.delete(uid)
             return next
           })
-          setSelectedKey(prev => prev === uid ? null : prev)
+          setSelectedKey(prev => {
+            if (prev === uid) {
+              setShowFullDetails(false)
+              return null
+            }
+            return prev
+          })
         } else if (env.type === 'SYNCED') {
           setIsLoading(false)
           setLoadError(null)
@@ -238,6 +264,7 @@ export default function App() {
   const columns = columnsByResource[resource] || columnsByResource.pods
   const sortedItems = sortItems(resource, [...items.values()])
   const selectedItem = selectedKey ? items.get(selectedKey) : null
+  const detailsItem = selectedItem && (showFullDetails ? selectedItem : cleanKubernetesObject(selectedItem))
 
   return (
     <div className="app">
@@ -282,7 +309,11 @@ export default function App() {
                   <tr
                     key={key}
                     className={selectedKey === key ? 'selected' : undefined}
-                    onClick={() => setSelectedKey(prev => prev === key ? null : key)}
+                    onClick={() => setSelectedKey(prev => {
+                      const next = prev === key ? null : key
+                      if (next !== prev) setShowFullDetails(false)
+                      return next
+                    })}
                   >
                     {columns.map(column => <td key={column.header} className={alignClass(column)}>{column.value(o)}</td>)}
                   </tr>
@@ -295,9 +326,17 @@ export default function App() {
           <section className="details-panel" aria-label="Selected resource details">
             <div className="details-header">
               <h2>{selectedItem.kind || resource}/{selectedItem.metadata?.name || selectedKey}</h2>
-              <button type="button" onClick={() => setSelectedKey(null)}>Close</button>
+              <div className="details-actions">
+                <button type="button" onClick={() => setShowFullDetails(prev => !prev)}>
+                  {showFullDetails ? 'Hide housekeeping' : 'Show full YAML'}
+                </button>
+                <button type="button" onClick={() => {
+                  setSelectedKey(null)
+                  setShowFullDetails(false)
+                }}>Close</button>
+              </div>
             </div>
-            <pre>{stringify(selectedItem)}</pre>
+            <pre>{stringify(detailsItem)}</pre>
           </section>
         )}
       </main>

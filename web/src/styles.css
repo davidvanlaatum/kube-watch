@@ -130,6 +130,10 @@ tr.selected { background: var(--row-selected) }
   margin: 0;
   font-size: 16px;
 }
+.details-actions {
+  display: flex;
+  gap: 8px;
+}
 .details-panel button {
   background: var(--control-background);
   color: var(--control-foreground);
