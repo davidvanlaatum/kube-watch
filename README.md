@@ -26,7 +26,7 @@ Production build:
 
 Notes & next steps
 - Current implementation is a prototype: watches use dynamic client and basic list-then-watch logic with in-memory resume.
-- It supports: pods, deployments, services, jobs, cronjobs, horizontal pod autoscalers, configmaps, secrets, events.
+- It supports: pods, deployments, statefulsets, replicasets, services, jobs, cronjobs, horizontal pod autoscalers, configmaps, secrets, serviceaccounts, poddisruptionbudgets, networkpolicies, events.
 - Improvements: add informer factories, backpressure, per-resource rate limiting, more robust reconnection with resourceVersion resumption and 410 handling, authentication fallback, UI filters.
 
 Troubleshooting & operational notes

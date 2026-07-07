@@ -10,16 +10,35 @@ type Column = {
   align?: 'left' | 'center' | 'right'
 }
 
-const eventSupportedResources = new Set(['pods', 'deployments', 'services', 'jobs', 'cronjobs', 'hpas', 'configmaps', 'secrets'])
+const eventSupportedResources = new Set([
+  'pods',
+  'deployments',
+  'statefulsets',
+  'replicasets',
+  'services',
+  'jobs',
+  'cronjobs',
+  'hpas',
+  'configmaps',
+  'secrets',
+  'serviceaccounts',
+  'poddisruptionbudgets',
+  'networkpolicies',
+])
 const resourceKinds: Record<string, string> = {
   pods: 'Pod',
   deployments: 'Deployment',
+  statefulsets: 'StatefulSet',
+  replicasets: 'ReplicaSet',
   services: 'Service',
   jobs: 'Job',
   cronjobs: 'CronJob',
   hpas: 'HorizontalPodAutoscaler',
   configmaps: 'ConfigMap',
   secrets: 'Secret',
+  serviceaccounts: 'ServiceAccount',
+  poddisruptionbudgets: 'PodDisruptionBudget',
+  networkpolicies: 'NetworkPolicy',
 }
 
 const columnsByResource: Record<string, Column[]> = {
@@ -36,6 +55,18 @@ const columnsByResource: Record<string, Column[]> = {
     { header: 'READY', value: (o) => `${o.status?.readyReplicas || 0}/${o.spec?.replicas ?? 0}`, align: 'center' },
     { header: 'UP-TO-DATE', value: (o) => o.status?.updatedReplicas || 0, align: 'right' },
     { header: 'AVAILABLE', value: (o) => o.status?.availableReplicas || 0, align: 'right' },
+    { header: 'AGE', value: age, align: 'right' },
+  ],
+  statefulsets: [
+    { header: 'NAME', value: name },
+    { header: 'READY', value: (o) => `${o.status?.readyReplicas || 0}/${o.spec?.replicas ?? 0}`, align: 'center' },
+    { header: 'AGE', value: age, align: 'right' },
+  ],
+  replicasets: [
+    { header: 'NAME', value: name },
+    { header: 'DESIRED', value: (o) => o.spec?.replicas ?? 0, align: 'right' },
+    { header: 'CURRENT', value: (o) => o.status?.replicas ?? 0, align: 'right' },
+    { header: 'READY', value: (o) => o.status?.readyReplicas ?? 0, align: 'right' },
     { header: 'AGE', value: age, align: 'right' },
   ],
   services: [
@@ -80,6 +111,23 @@ const columnsByResource: Record<string, Column[]> = {
     { header: 'NAME', value: name },
     { header: 'TYPE', value: (o) => o.type || '' },
     { header: 'DATA', value: (o) => Object.keys(o.data || {}).length, align: 'right' },
+    { header: 'AGE', value: age, align: 'right' },
+  ],
+  serviceaccounts: [
+    { header: 'NAME', value: name },
+    { header: 'SECRETS', value: (o) => o.secrets?.length || 0, align: 'right' },
+    { header: 'AGE', value: age, align: 'right' },
+  ],
+  poddisruptionbudgets: [
+    { header: 'NAME', value: name },
+    { header: 'MIN AVAILABLE', value: (o) => o.spec?.minAvailable ?? 'N/A', align: 'right' },
+    { header: 'MAX UNAVAILABLE', value: (o) => o.spec?.maxUnavailable ?? 'N/A', align: 'right' },
+    { header: 'ALLOWED DISRUPTIONS', value: (o) => o.status?.disruptionsAllowed ?? 0, align: 'right' },
+    { header: 'AGE', value: age, align: 'right' },
+  ],
+  networkpolicies: [
+    { header: 'NAME', value: name },
+    { header: 'POD-SELECTOR', value: (o) => labelSelector(o.spec?.podSelector) },
     { header: 'AGE', value: age, align: 'right' },
   ],
   events: [
@@ -159,6 +207,12 @@ function hpaReference(o: any) {
   const ref = o.spec?.scaleTargetRef
   if (!ref) return '<none>'
   return `${ref.kind || ''}/${ref.name || ''}`
+}
+
+function labelSelector(selector?: any) {
+  const labels = selector?.matchLabels || {}
+  const parts = Object.entries(labels).map(([key, value]) => `${key}=${value}`)
+  return parts.length ? parts.join(',') : '<none>'
 }
 
 function hpaTargets(o: any) {
@@ -426,12 +480,17 @@ export default function App() {
           <select value={resource} onChange={e=>setResource(e.target.value)}>
             <option value="pods">pods</option>
             <option value="deployments">deployments</option>
+            <option value="statefulsets">statefulsets</option>
+            <option value="replicasets">replicasets</option>
             <option value="services">services</option>
             <option value="jobs">jobs</option>
             <option value="cronjobs">cronjobs</option>
             <option value="hpas">hpas</option>
             <option value="configmaps">configmaps</option>
             <option value="secrets">secrets</option>
+            <option value="serviceaccounts">serviceaccounts</option>
+            <option value="poddisruptionbudgets">poddisruptionbudgets</option>
+            <option value="networkpolicies">networkpolicies</option>
             <option value="events">events</option>
           </select>
         </div>

@@ -28,15 +28,20 @@ import (
 var embeddedDist embed.FS
 
 var supportedResources = map[string]schema.GroupVersionResource{
-	"pods":        {Group: "", Version: "v1", Resource: "pods"},
-	"deployments": {Group: "apps", Version: "v1", Resource: "deployments"},
-	"services":    {Group: "", Version: "v1", Resource: "services"},
-	"jobs":        {Group: "batch", Version: "v1", Resource: "jobs"},
-	"cronjobs":    {Group: "batch", Version: "v1", Resource: "cronjobs"},
-	"hpas":        {Group: "autoscaling", Version: "v2", Resource: "horizontalpodautoscalers"},
-	"configmaps":  {Group: "", Version: "v1", Resource: "configmaps"},
-	"secrets":     {Group: "", Version: "v1", Resource: "secrets"},
-	"events":      {Group: "", Version: "v1", Resource: "events"},
+	"pods":                 {Group: "", Version: "v1", Resource: "pods"},
+	"deployments":          {Group: "apps", Version: "v1", Resource: "deployments"},
+	"statefulsets":         {Group: "apps", Version: "v1", Resource: "statefulsets"},
+	"replicasets":          {Group: "apps", Version: "v1", Resource: "replicasets"},
+	"services":             {Group: "", Version: "v1", Resource: "services"},
+	"jobs":                 {Group: "batch", Version: "v1", Resource: "jobs"},
+	"cronjobs":             {Group: "batch", Version: "v1", Resource: "cronjobs"},
+	"hpas":                 {Group: "autoscaling", Version: "v2", Resource: "horizontalpodautoscalers"},
+	"configmaps":           {Group: "", Version: "v1", Resource: "configmaps"},
+	"secrets":              {Group: "", Version: "v1", Resource: "secrets"},
+	"serviceaccounts":      {Group: "", Version: "v1", Resource: "serviceaccounts"},
+	"poddisruptionbudgets": {Group: "policy", Version: "v1", Resource: "poddisruptionbudgets"},
+	"networkpolicies":      {Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"},
+	"events":               {Group: "", Version: "v1", Resource: "events"},
 }
 
 func main() {
