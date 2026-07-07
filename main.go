@@ -11,7 +11,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"os"
@@ -54,12 +54,14 @@ func main() {
 
 	configBytes, err := os.ReadFile(kubeconfig)
 	if err != nil {
-		log.Fatalf("failed to read kubeconfig: %v", err)
+		slog.Error("failed to read kubeconfig", "error", err)
+		os.Exit(1)
 	}
 
 	config, err := clientcmd.Load(configBytes)
 	if err != nil {
-		log.Fatalf("failed to parse kubeconfig: %v", err)
+		slog.Error("failed to parse kubeconfig", "error", err)
+		os.Exit(1)
 	}
 
 	contexts := listContexts(config, kubeconfig)
@@ -68,9 +70,10 @@ func main() {
 	certPath := filepath.Join("./certs", "cert.pem")
 	keyPath := filepath.Join("./certs", "key.pem")
 	if _, err := os.Stat(certPath); os.IsNotExist(err) {
-		log.Println("generating self-signed TLS certs in ./certs")
+		slog.Info("generating self-signed TLS certs", "directory", "./certs")
 		if err := generateSelfSignedCert(certPath, keyPath); err != nil {
-			log.Fatalf("failed to generate certs: %v", err)
+			slog.Error("failed to generate certs", "error", err)
+			os.Exit(1)
 		}
 	}
 
@@ -80,7 +83,8 @@ func main() {
 	mux := http.NewServeMux()
 	distFS, err := fs.Sub(embeddedDist, "web/dist")
 	if err != nil {
-		log.Fatalf("failed to load embedded frontend: %v", err)
+		slog.Error("failed to load embedded frontend", "error", err)
+		os.Exit(1)
 	}
 	fileServer := http.FileServer(http.FS(distFS))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -162,8 +166,11 @@ func main() {
 	cert, _ := tls.LoadX509KeyPair(certPath, keyPath)
 	srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
 
-	log.Println("Go SSE backend listening https://localhost:9443 — endpoints: /api/contexts and /sse/{context}/{resource}")
-	log.Fatal(srv.ListenAndServeTLS("", ""))
+	slog.Info("server listening", "addr", "https://localhost:9443", "endpoints", "/api/contexts,/sse/{context}/{resource}")
+	if err := srv.ListenAndServeTLS("", ""); err != nil {
+		slog.Error("server stopped", "error", err)
+		os.Exit(1)
+	}
 }
 
 func listContexts(cfg *api.Config, kubeconfigPath string) []map[string]string {

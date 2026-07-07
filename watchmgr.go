@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -59,11 +59,13 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 		cfg, err := clientCfg.ClientConfig()
 		if err != nil {
 			m.mu.Unlock()
+			slog.Error("failed to build cluster config", "cluster", cluster, "resource", gvr.Resource, "error", err)
 			return nil, nil, fmt.Errorf("failed to build config for %s: %w", cluster, err)
 		}
 		dyn, err := dynamic.NewForConfig(cfg)
 		if err != nil {
 			m.mu.Unlock()
+			slog.Error("failed to create cluster client", "cluster", cluster, "resource", gvr.Resource, "error", err)
 			return nil, nil, fmt.Errorf("failed to create dynamic client: %w", err)
 		}
 		ns, _, nerr := clientCfg.Namespace()
@@ -81,26 +83,31 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 			stopCh:    make(chan struct{}),
 		}
 		m.entries[key] = e
+		slog.Info("created cluster watch entry", "cluster", cluster, "namespace", ns, "resource", gvr.Resource, "group", gvr.Group, "version", gvr.Version)
 		// add subscriber channel before starting run to avoid race
 		m.mu.Unlock()
 		ch := make(chan []byte, 256)
 		e.mu.Lock()
 		e.clients[ch] = struct{}{}
+		clientCount := len(e.clients)
 		if e.idle != nil {
 			_ = e.idle.Stop()
 			e.idle = nil
 		}
 		e.mu.Unlock()
+		slog.Info("sse subscription opened", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "clients", clientCount)
 		go e.run(m.kubeconfigPath)
 		// return subscription
 		unsubscribe := func() {
 			e.mu.Lock()
 			delete(e.clients, ch)
 			close(ch)
+			clientCount := len(e.clients)
 			if len(e.clients) == 0 {
 				e.idle = time.AfterFunc(30*time.Second, func() { e.stop() })
 			}
 			e.mu.Unlock()
+			slog.Info("sse subscription closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "clients", clientCount)
 		}
 		return ch, unsubscribe, nil
 	} else {
@@ -111,6 +118,7 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 	ch := make(chan []byte, 256)
 	e.mu.Lock()
 	e.clients[ch] = struct{}{}
+	clientCount := len(e.clients)
 	// stop idle timer if running
 	if e.idle != nil {
 		_ = e.idle.Stop()
@@ -123,6 +131,7 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 	}
 	terminalError := e.terminalError
 	e.mu.Unlock()
+	slog.Info("sse subscription opened", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "clients", clientCount)
 	go func() {
 		// send cached entries (non-blocking per item)
 		for _, v := range cacheSnapshot {
@@ -148,6 +157,7 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 		e.mu.Lock()
 		delete(e.clients, ch)
 		close(ch)
+		clientCount := len(e.clients)
 		// if no clients, start idle timer to stop watch
 		if len(e.clients) == 0 {
 			e.idle = time.AfterFunc(30*time.Second, func() {
@@ -155,6 +165,7 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 			})
 		}
 		e.mu.Unlock()
+		slog.Info("sse subscription closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "clients", clientCount)
 	}
 
 	return ch, unsubscribe, nil
@@ -166,6 +177,7 @@ func (e *watchEntry) stop() {
 	case <-e.stopCh:
 		// already closed
 	default:
+		slog.Info("stopping cluster watch entry", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource)
 		close(e.stopCh)
 	}
 	e.mu.Unlock()
@@ -190,11 +202,12 @@ func (e *watchEntry) run(kubeconfigPath string) {
 			}
 			e.broadcast(syncedEvent)
 		} else {
-			log.Printf("[%s][%s][%s] namespaced initial list failed: %v", e.cluster, e.namespace, e.gvr.Resource, err)
+			slog.Error("namespaced initial list failed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "error", err)
 			msg := errorEvent("namespaced initial list failed", err)
 			if errors.IsForbidden(err) {
 				e.setTerminalError(msg)
 				e.broadcast(msg)
+				slog.Info("cluster watch closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "reason", "forbidden")
 				return
 			}
 			e.broadcast(msg)
@@ -215,27 +228,28 @@ func (e *watchEntry) run(kubeconfigPath string) {
 		if err != nil {
 			// log and broadcast error to clients with details
 			if errors.IsForbidden(err) {
-				log.Printf("[%s][%s][%s] namespaced watch start forbidden (rv=%s): %v", e.cluster, e.namespace, e.gvr.Resource, opts.ResourceVersion, err)
+				slog.Error("namespaced watch start forbidden", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "resourceVersion", opts.ResourceVersion, "error", err)
 				msg := errorEvent("namespaced watch forbidden", err)
 				e.setTerminalError(msg)
 				e.broadcast(msg)
 				cancel()
+				slog.Info("cluster watch closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "reason", "forbidden")
 				return
 			} else {
 				if se, ok := err.(errors.APIStatus); ok {
 					st := se.Status()
 					// if resourceVersion is too old, clear lastRV to force a fresh list before retry
 					if st.Code == 410 || st.Reason == metav1.StatusReasonExpired {
-						log.Printf("[%s][%s][%s] namespaced watch start returned 410/Expired (rv=%s): %s; will re-list", e.cluster, e.namespace, e.gvr.Resource, opts.ResourceVersion, st.Message)
+						slog.Warn("namespaced watch resourceVersion expired on start", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "resourceVersion", opts.ResourceVersion, "message", st.Message)
 						e.broadcast(errorMessage("namespaced watch resourceVersion expired: " + st.Message + "; re-listing"))
 						// reset lastRV to force a full re-list on next loop
 						e.lastRV = ""
 					} else {
-						log.Printf("[%s][%s][%s] namespaced watch start failed (rv=%s): %s", e.cluster, e.namespace, e.gvr.Resource, opts.ResourceVersion, st.Message)
+						slog.Error("namespaced watch start failed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "resourceVersion", opts.ResourceVersion, "message", st.Message)
 						e.broadcast(errorMessage("namespaced watch failed: " + st.Message))
 					}
 				} else {
-					log.Printf("[%s][%s][%s] namespaced watch start failed (rv=%s): %v", e.cluster, e.namespace, e.gvr.Resource, opts.ResourceVersion, err)
+					slog.Error("namespaced watch start failed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "resourceVersion", opts.ResourceVersion, "error", err)
 					e.broadcast(errorEvent("namespaced watch failed", err))
 				}
 			}
@@ -248,6 +262,7 @@ func (e *watchEntry) run(kubeconfigPath string) {
 			}
 			continue
 		}
+		slog.Info("cluster watch opened", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "resourceVersion", opts.ResourceVersion)
 
 		ch := watcher.ResultChan()
 		running := true
@@ -257,13 +272,14 @@ func (e *watchEntry) run(kubeconfigPath string) {
 				running = false
 				watcher.Stop()
 				cancel()
+				slog.Info("cluster watch closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "reason", "stop requested")
 				return
 			case ev, ok := <-ch:
 				if !ok {
 					running = false
 					watcher.Stop()
 					cancel()
-					log.Printf("[%s][%s][%s] namespaced watch channel closed, will recreate", e.cluster, e.namespace, e.gvr.Resource)
+					slog.Warn("cluster watch channel closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource)
 					// will loop and recreate watch
 					break
 				}
@@ -272,7 +288,7 @@ func (e *watchEntry) run(kubeconfigPath string) {
 					if se, ok := ev.Object.(errors.APIStatus); ok {
 						st := se.Status()
 						if st.Code == 410 || st.Reason == metav1.StatusReasonExpired {
-							log.Printf("[%s][%s][%s] received watch ERROR 410/Expired: %s; will re-list", e.cluster, e.namespace, e.gvr.Resource, st.Message)
+							slog.Warn("received watch resourceVersion expired", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "message", st.Message)
 							e.broadcast(errorMessage("watch resourceVersion expired: " + st.Message + "; re-listing"))
 							// clear lastRV to force a fresh list on next iteration
 							e.lastRV = ""
@@ -281,6 +297,7 @@ func (e *watchEntry) run(kubeconfigPath string) {
 							w := watcher
 							w.Stop()
 							cancel()
+							slog.Info("cluster watch closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "reason", "resourceVersion expired")
 							break
 						}
 						// not an expiry - broadcast the status message
@@ -325,7 +342,7 @@ func (e *watchEntry) runNamespaced(ns string) error {
 			}
 			e.broadcast(syncedEvent)
 		} else {
-			log.Printf("[%s][%s] namespaced list %s failed: %v", e.cluster, e.gvr.Resource, ns, err)
+			slog.Error("namespaced list failed", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource, "error", err)
 			e.broadcast(errorEvent(fmt.Sprintf("namespaced list %s failed", ns), err))
 			// if this namespace is forbidden, return error so caller can try others
 			return err
@@ -335,7 +352,7 @@ func (e *watchEntry) runNamespaced(ns string) error {
 		opts := metav1.ListOptions{Watch: true}
 		watcher, err := res.Namespace(ns).Watch(ctx, opts)
 		if err != nil {
-			log.Printf("[%s][%s] namespaced watch %s failed: %v", e.cluster, e.gvr.Resource, ns, err)
+			slog.Error("namespaced watch failed", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource, "error", err)
 			e.broadcast(errorEvent(fmt.Sprintf("namespaced watch %s failed", ns), err))
 			cancel()
 			select {
@@ -345,6 +362,7 @@ func (e *watchEntry) runNamespaced(ns string) error {
 			}
 			continue
 		}
+		slog.Info("cluster watch opened", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource)
 
 		ch := watcher.ResultChan()
 		for {
@@ -352,11 +370,13 @@ func (e *watchEntry) runNamespaced(ns string) error {
 			case <-e.stopCh:
 				watcher.Stop()
 				cancel()
+				slog.Info("cluster watch closed", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource, "reason", "stop requested")
 				return nil
 			case ev, ok := <-ch:
 				if !ok {
 					watcher.Stop()
 					cancel()
+					slog.Warn("cluster watch channel closed", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource)
 					break
 				}
 				// handle ERROR events signaling resourceVersion expiry
@@ -364,7 +384,7 @@ func (e *watchEntry) runNamespaced(ns string) error {
 					if se, ok := ev.Object.(errors.APIStatus); ok {
 						st := se.Status()
 						if st.Code == 410 || st.Reason == metav1.StatusReasonExpired {
-							log.Printf("[%s][%s] received watch ERROR 410/Expired for %s: %s; will re-list", e.cluster, ns, e.gvr.Resource, st.Message)
+							slog.Warn("received watch resourceVersion expired", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource, "message", st.Message)
 							e.broadcast(errorMessage(fmt.Sprintf("watch resourceVersion expired for %s: %s; re-listing", ns, st.Message)))
 							e.lastRV = ""
 							w := watcher
@@ -400,7 +420,7 @@ func (e *watchEntry) runNamespacedMultiple(names []string) error {
 	if len(names) > 10 {
 		names = names[:10]
 	}
-	log.Printf("[%s][%s] starting namespaced watchers for: %v", e.cluster, e.gvr.Resource, names)
+	slog.Info("starting namespaced watchers", "cluster", e.cluster, "resource", e.gvr.Resource, "namespaces", names)
 	var wg sync.WaitGroup
 	for _, ns := range names {
 		wg.Add(1)
