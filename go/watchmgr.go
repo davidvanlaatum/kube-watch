@@ -194,8 +194,16 @@ func (e *watchEntry) run(kubeconfigPath string) {
 			} else {
 				if se, ok := err.(errors.APIStatus); ok {
 					st := se.Status()
-					log.Printf("[%s][%s][%s] namespaced watch start failed (rv=%s): %s", e.cluster, e.namespace, e.gvr.Resource, opts.ResourceVersion, st.Message)
-					e.broadcast([]byte(fmt.Sprintf(`{"error":"namespaced watch failed: %s"}`, st.Message)))
+					// if resourceVersion is too old, clear lastRV to force a fresh list before retry
+					if st.Code == 410 || st.Reason == metav1.StatusReasonExpired {
+						log.Printf("[%s][%s][%s] namespaced watch start returned 410/Expired (rv=%s): %s; will re-list", e.cluster, e.namespace, e.gvr.Resource, opts.ResourceVersion, st.Message)
+						e.broadcast([]byte(fmt.Sprintf(`{"error":"namespaced watch resourceVersion expired: %s; re-listing"}`, st.Message)))
+						// reset lastRV to force a full re-list on next loop
+						e.lastRV = ""
+					} else {
+						log.Printf("[%s][%s][%s] namespaced watch start failed (rv=%s): %s", e.cluster, e.namespace, e.gvr.Resource, opts.ResourceVersion, st.Message)
+						e.broadcast([]byte(fmt.Sprintf(`{"error":"namespaced watch failed: %s"}`, st.Message)))
+					}
 				} else {
 					log.Printf("[%s][%s][%s] namespaced watch start failed (rv=%s): %v", e.cluster, e.namespace, e.gvr.Resource, opts.ResourceVersion, err)
 					e.broadcast([]byte(fmt.Sprintf(`{"error":"namespaced watch failed: %s"}`, err.Error())))
@@ -228,6 +236,33 @@ func (e *watchEntry) run(kubeconfigPath string) {
 					log.Printf("[%s][%s][%s] namespaced watch channel closed, will recreate", e.cluster, e.namespace, e.gvr.Resource)
 					// will loop and recreate watch
 					break
+				}
+				// handle error events that may indicate resourceVersion expiry (410)
+				if string(ev.Type) == "ERROR" {
+					if se, ok := ev.Object.(errors.APIStatus); ok {
+						st := se.Status()
+						if st.Code == 410 || st.Reason == metav1.StatusReasonExpired {
+							log.Printf("[%s][%s][%s] received watch ERROR 410/Expired: %s; will re-list", e.cluster, e.namespace, e.gvr.Resource, st.Message)
+							e.broadcast([]byte(fmt.Sprintf(`{"error":"watch resourceVersion expired: %s; re-listing"}`, st.Message)))
+							// clear lastRV to force a fresh list on next iteration
+							e.lastRV = ""
+							// stop watcher and recreate by breaking out of loop
+							running = false
+							w := watcher
+							w.Stop()
+							cancel()
+							break
+						}
+						// not an expiry - broadcast the status message
+						b, _ := json.Marshal(map[string]interface{}{"type": ev.Type, "object": ev.Object})
+						e.broadcast(b)
+						continue
+					} else {
+						// unknown error object shape - forward it upstream
+						b, _ := json.Marshal(map[string]interface{}{"type": ev.Type, "object": ev.Object})
+						e.broadcast(b)
+						continue
+					}
 				}
 				// update last RV when possible
 				if uo, ok := ev.Object.(*unstructured.Unstructured); ok {
@@ -292,6 +327,24 @@ func (e *watchEntry) runNamespaced(ns string) error {
 					watcher.Stop()
 					cancel()
 					break
+				}
+				// handle ERROR events signaling resourceVersion expiry
+				if string(ev.Type) == "ERROR" {
+					if se, ok := ev.Object.(errors.APIStatus); ok {
+						st := se.Status()
+						if st.Code == 410 || st.Reason == metav1.StatusReasonExpired {
+							log.Printf("[%s][%s] received watch ERROR 410/Expired for %s: %s; will re-list", e.cluster, ns, e.gvr.Resource, st.Message)
+							e.broadcast([]byte(fmt.Sprintf(`{"error":"watch resourceVersion expired for %s: %s; re-listing"}`, ns, st.Message)))
+							e.lastRV = ""
+							w := watcher
+							w.Stop()
+							cancel()
+							break
+						}
+					}
+					b, _ := json.Marshal(map[string]interface{}{"type": ev.Type, "object": ev.Object})
+					e.broadcast(b)
+					continue
 				}
 				if uo, ok := ev.Object.(*unstructured.Unstructured); ok {
 					if rv := uo.GetResourceVersion(); rv != "" {
