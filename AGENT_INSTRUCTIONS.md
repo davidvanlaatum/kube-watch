@@ -10,13 +10,14 @@ Agent Persona
 
 Primary Objectives
 1. Ensure the Go backend reliably lists and watches namespaced Kubernetes resources and provides an in-memory snapshot for new subscribers.
-2. Keep the Node frontend simple: connect to SSE, render a "top" view, and handle reconnects/fresh snapshots.
-3. Add robust 410 Gone handling, CLI flags (port, log-level, persist-cache), and tests (Playwright + unit tests) as requested.
+2. Keep the Vite + React frontend simple: connect to SSE, render a "top" view, and handle reconnects/fresh snapshots.
+3. Add CLI flags (port, log-level, persist-cache), and tests (Playwright + unit tests) as requested.
 
 What agents may do
 - Modify Go code in the repository root and frontend code under /web to fix bugs and add features per the project plan.
 - Run local builds, linters, and targeted tests. Use existing npm/go test scripts; do not add new global tools unnecessarily.
 - Create or update documentation (README.md, PLAN.md, AGENT_INSTRUCTIONS.md).
+- Keep documentation current whenever behavior, setup, architecture, resource support, logging, or operational workflows change.
 
 What agents must not do
 - Commit secrets (tokens, service account keys, credentials) into the repository.
@@ -27,7 +28,7 @@ Runbook (dev/test)
 - Start backend: go run .
 - Start frontend (dev): cd web && npm install && npm run dev
 - Use the Vite dev server for browser/headless testing; it proxies API/SSE requests to the Go backend.
-- Check logs: go server stdout and web/server logs; tail them for debugging.
+- Check backend structured slog output on stdout; Vite dev server logs are available from `npm run dev`.
 
 Testing guidance
 - Add a Playwright test that uses the Vite dev server and validates: initial snapshot delivered, ADDED/MODIFIED/DELETED flow, reconnect behavior.
@@ -39,6 +40,7 @@ Escalation & Questions
 
 Pull requests & commits
 - Make small, reviewable changes. Use descriptive commit messages. Include Co-authored-by trailer for Copilot commits when requested.
+- Before committing, check README.md, PLAN.md, and agent instructions for stale setup steps, resource lists, limitations, or troubleshooting guidance.
 
 Contact points
 - Provide logs, failing test output, and steps to reproduce with any bug report.

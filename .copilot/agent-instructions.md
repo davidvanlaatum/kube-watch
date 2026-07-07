@@ -6,6 +6,7 @@ Overview
 Key rules
 - Operate only within namespace scope unless the user explicitly grants cluster-wide access.
 - Do not attempt interactive re-authentication for gke-gcloud-auth-plugin; document or request user action instead.
+- Keep README.md, PLAN.md, and agent instructions in sync with behavior, setup, resource support, logging, and operational workflow changes.
 - When in doubt, ask the user one focused question.
 
 Startup checklist for changes requiring runtime validation
@@ -15,7 +16,7 @@ Startup checklist for changes requiring runtime validation
 
 Error handling
 - Log and surface the exact APIStatus or error message from Kubernetes watches.
-- On watch closure, implement exponential backoff and re-list when encountering 410 Gone.
+- On watch closure, preserve retry behavior and re-list when encountering 410 Gone/Expired.
 
 Files of interest
 - watchmgr.go — shared watches, snapshot cache, resume logic
@@ -25,6 +26,7 @@ Files of interest
 When creating PRs
 - Include changelog notes and a short reproduction plan for runtime changes.
 - Add a Playwright or unit test when fixing watch/resume behaviors.
+- Check docs for stale setup steps, resource lists, limitations, and troubleshooting guidance before committing.
 
 If you need more context
 - Read PLAN.md for architecture and next steps.

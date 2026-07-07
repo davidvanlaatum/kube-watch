@@ -4,11 +4,11 @@ Last updated: 2026-07-07
 
 Overview
 
-kube-watch is a prototype realtime Kubernetes watcher: a Go backend that discovers kubeconfig contexts and exposes per-context resource Server-Sent Events (SSE), and a Node frontend that proxies SSE and renders a live "top"-style view in the browser.
+kube-watch is a prototype realtime Kubernetes watcher: a Go backend that discovers kubeconfig contexts and exposes per-context resource Server-Sent Events (SSE), and a Vite + React frontend that proxies SSE in dev and renders a live "top"-style view in the browser.
 
 Goals
 
-- Provide a simple, low-friction UI to observe live Kubernetes objects (Pods, Deployments, Services, Jobs, CronJobs, ConfigMaps, Secrets, Events) scoped to contexts and namespaces the user can access.
+- Provide a simple, low-friction UI to observe live Kubernetes objects scoped to contexts and namespaces the user can access.
 - Support kubeconfig exec plugins (gke-gcloud-auth-plugin) for GKE contexts.
 - Be resilient to transient watch failures and reconnect cleanly, delivering a consistent view to clients.
 
@@ -27,7 +27,7 @@ Architecture
   - HTTP(S) server: endpoints
     - /api/contexts => [{name, namespace}, ...]
     - /sse/{context}/{resource} => SSE event stream (ADDED/MODIFIED/DELETED + info/error messages)
-  - TLS: self-signed certs in ./certs for local HTTPS; Node frontend can be forced to HTTP for testing.
+  - TLS: self-signed certs in ./certs for local HTTPS.
 
 - Frontend (Vite + React + TypeScript)
   - Vite dev server proxies /api and /sse to Go backend.
@@ -44,23 +44,22 @@ Key design decisions
 Current status (2026-07-07)
 
 - Implemented: context discovery, namespaced list+watch, SSE endpoint, shared WatchManager, in-memory snapshot cache, frontend UI and proxy.
-- Working: contexts listing, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, Vite dev proxy for local testing.
+- Working: contexts listing, stable context ordering, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, Vite dev proxy for local testing, embedded production UI, YAML/details panel with resource-scoped events, structured slog lifecycle logs.
 - Known limitations:
   - Snapshot is memory-only (lost on restart).
-  - 410 Gone handling (resourceVersion too old) should trigger explicit re-list before re-watching — partial retry logic exists but re-list on 410 is not yet robust.
-  - Multi-namespace cluster-wide view is limited when cluster-list is forbidden — current fallback watches either context default namespace or up to 10 namespaces (configurable later).
+  - Multi-namespace cluster-wide view is limited when cluster-list is forbidden — current behavior watches the context default namespace.
   - Exec plugin requires interactive gcloud credentials if tokens expired; the backend cannot prompt — run `gcloud auth login` before starting.
 
 Project milestones & plan
 
 1) Stabilize (Immediate, 1-3 days)
-   - Implement robust 410 Gone handling: detect 410 from watch errors, trigger re-list to obtain a fresh resourceVersion, then re-watch.
-   - Improve logging and add --log-level flag. Ensure clear user-facing SSE info/error messages.
+   - Add --log-level flag for structured slog output.
+   - Ensure clear user-facing SSE info/error messages for additional APIStatus cases.
    - Add tests: simple integration test that starts backend+frontend (HTTP), connects via SSE and asserts initial snapshot + an artificial event.
 
 2) UX & functionality (Short-term, 1-2 weeks)
    - Multi-namespace selection UI: allow user to specify additional namespaces to watch for a context (with sensible limits).
-   - Row highlight animations, filter/search, counts per namespace, YAML view.
+   - Row highlight animations, filter/search, counts per namespace.
    - Optionally persist snapshots to disk (small bolt DB) for faster warm-start across restarts (configurable).
 
 3) GKE / Auth & CI (Short-term)
@@ -99,12 +98,13 @@ Agent / Operator instructions (runbook)
 - Debugging tips
   - If SSE stream shows {"error":"namespaced initial list failed: ... exec plugin failed"}: run `gcloud auth login` and restart the backend.
   - To inspect server logs: run backend interactively (go run .) or tail the log file if started with nohup.
-  - If events stop: check watchmgr logs for "watch channel closed" or 410 errors; re-list logic may be needed.
+  - If events stop: check structured logs for `cluster watch channel closed`, forbidden access, or 410/Expired re-list messages.
 
 Contributing / PR checklist
 
 - Run the backend locally and validate the UI connects and receives initial snapshot.
 - Add unit tests for any non-trivial logic (watchEntry cache behavior, broadcast semantics).
+- Keep README.md, PLAN.md, and agent instructions current when behavior, setup, resource support, logging, or troubleshooting changes.
 - Follow the commit trailer convention when committing: include the Copilot Co-authored-by trailer if changes were assisted by the agent.
 
 Acceptance criteria for completion
@@ -115,7 +115,6 @@ Acceptance criteria for completion
 
 Next actionable items (prioritized)
 
-- Implement robust 410 Gone handling and test it (highest priority).
 - Add CLI flags: --log-level, --port, --persist-cache (path).
 - Add multi-namespace selection in the UI.
 - Add containerization and simple Docker Compose for local integration testing.

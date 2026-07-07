@@ -2,7 +2,7 @@ kube-watch — prototype
 
 Overview
 - Go backend: discovers kubeconfig contexts, opens watches to clusters/resources and exposes SSE endpoints over HTTPS (self-signed certs in ./certs).
-- Node frontend: serves static UI and proxies /api and /sse to the Go backend. Browser tabs show one resource type per cluster; connections are opened lazily.
+- Vite + React frontend: proxies /api and /sse during development and is embedded into the Go binary from web/dist for production.
 
 Quick start (local)
 1. Ensure kubectl and gcloud (if using GKE) are installed and kubeconfig has contexts that can authenticate (gke-gcloud-auth-plugin supported by client-go exec plugin).
@@ -27,16 +27,16 @@ Production build:
 Notes & next steps
 - Current implementation is a prototype: watches use dynamic client and basic list-then-watch logic with in-memory resume.
 - It supports: pods, deployments, statefulsets, replicasets, services, jobs, cronjobs, horizontal pod autoscalers, configmaps, secrets, serviceaccounts, poddisruptionbudgets, networkpolicies, events.
-- Improvements: add informer factories, backpressure, per-resource rate limiting, more robust reconnection with resourceVersion resumption and 410 handling, authentication fallback, UI filters.
+- Improvements: add informer factories, backpressure, per-resource rate limiting, authentication fallback, UI filters, and optional persisted snapshots.
 
 Troubleshooting & operational notes
-- Logs: run the backend interactively with `go run .` to see logs on stdout (recommended). If started with nohup, write logs to a local `*.log` file.
+- Logs: run the backend interactively with `go run .` to see structured slog output on stdout (recommended). Watch/subscription open/close, forbidden access, and reconnect conditions are logged with cluster, namespace, and resource fields.
 
 - gke / gcloud auth: contexts that use `gke-gcloud-auth-plugin` require `gcloud` credentials accessible to the Go process. Run `gcloud auth login` (interactive) before starting the backend so the exec plugin can obtain tokens.
 
 - Snapshot cache behavior: the backend maintains an in-memory snapshot per (context,resource,namespace). When a new browser client subscribes it immediately receives the last-known ADDED/MODIFIED objects (so refreshing the page repopulates state). The snapshot is memory-resident and lost when the server restarts.
 
-- Reconnect behavior: watches are namespaced (per-context default namespace) to match RBAC-limited users. The server attempts to resume using resourceVersion when possible; explicit 410 handling (re-list on Gone) is a planned improvement.
+- Reconnect behavior: watches are namespaced (per-context default namespace) to match RBAC-limited users. The server attempts to resume using resourceVersion when possible and re-lists on 410/Expired. Forbidden list/watch failures are treated as terminal for that subscription and surfaced to the UI.
 
 Agent / operator instructions
 - Start backend interactively:
