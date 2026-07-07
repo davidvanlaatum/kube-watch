@@ -3,10 +3,22 @@ import { stringify } from 'yaml'
 
 type ContextInfo = { name: string; namespace: string }
 type Envelope = { type?: string; object?: any; error?: string; info?: string }
+type DetailsTab = 'yaml' | 'events'
 type Column = {
   header: string
   value: (object: any) => React.ReactNode
   align?: 'left' | 'center' | 'right'
+}
+
+const eventSupportedResources = new Set(['pods', 'deployments', 'services', 'jobs', 'cronjobs', 'configmaps', 'secrets'])
+const resourceKinds: Record<string, string> = {
+  pods: 'Pod',
+  deployments: 'Deployment',
+  services: 'Service',
+  jobs: 'Job',
+  cronjobs: 'CronJob',
+  configmaps: 'ConfigMap',
+  secrets: 'Secret',
 }
 
 const columnsByResource: Record<string, Column[]> = {
@@ -187,10 +199,15 @@ export default function App() {
   const [resource, setResource] = useState<string>('pods')
   const [items, setItems] = useState<Map<string, any>>(new Map())
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [detailsTab, setDetailsTab] = useState<DetailsTab>('yaml')
   const [showFullDetails, setShowFullDetails] = useState(false)
+  const [selectedEvents, setSelectedEvents] = useState<Map<string, any>>(new Map())
+  const [eventsLoading, setEventsLoading] = useState(false)
+  const [eventsError, setEventsError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
+  const eventsEsRef = useRef<EventSource | null>(null)
 
   useEffect(() => {
     fetch('/api/contexts').then(r => r.json()).then(setContexts).catch(console.error)
@@ -205,6 +222,7 @@ export default function App() {
     }
     setItems(new Map())
     setSelectedKey(null)
+    setDetailsTab('yaml')
     setShowFullDetails(false)
     setIsLoading(true)
     setLoadError(null)
@@ -234,6 +252,7 @@ export default function App() {
           setSelectedKey(prev => {
             if (prev === uid) {
               setShowFullDetails(false)
+              setDetailsTab('yaml')
               return null
             }
             return prev
@@ -265,6 +284,81 @@ export default function App() {
   const sortedItems = sortItems(resource, [...items.values()])
   const selectedItem = selectedKey ? items.get(selectedKey) : null
   const detailsItem = selectedItem && (showFullDetails ? selectedItem : cleanKubernetesObject(selectedItem))
+  const supportsEvents = Boolean(selectedItem && eventSupportedResources.has(resource))
+  const sortedSelectedEvents = sortItems('events', [...selectedEvents.values()])
+
+  useEffect(() => {
+    if (eventsEsRef.current) {
+      eventsEsRef.current.close()
+      eventsEsRef.current = null
+    }
+    setSelectedEvents(new Map())
+    setEventsError(null)
+
+    if (!ctx || !selectedItem || !supportsEvents) {
+      setEventsLoading(false)
+      return
+    }
+
+    setEventsLoading(true)
+    const selected = selectedItem
+    const es = new EventSource(`/sse/${encodeURIComponent(ctx)}/events`)
+    const emptyEventsTimer = window.setTimeout(() => {
+      setEventsLoading(false)
+    }, 2500)
+    es.onmessage = (ev) => {
+      try {
+        const env: Envelope = JSON.parse(ev.data)
+        if (env.type === 'SYNCED') {
+          window.clearTimeout(emptyEventsTimer)
+          setEventsLoading(false)
+          return
+        }
+        if (env.error) {
+          window.clearTimeout(emptyEventsTimer)
+          setEventsLoading(false)
+          setEventsError(env.error)
+          return
+        }
+        if (!env.object || !eventMatchesResource(env.object, selected, resource)) {
+          return
+        }
+        window.clearTimeout(emptyEventsTimer)
+        setEventsLoading(false)
+        setEventsError(null)
+        const uid = objectKey(env.object)
+        if (env.type === 'DELETED') {
+          setSelectedEvents(prev => {
+            const next = new Map(prev)
+            next.delete(uid)
+            return next
+          })
+          return
+        }
+        if (env.type === 'ADDED' || env.type === 'MODIFIED') {
+          setSelectedEvents(prev => {
+            const next = new Map(prev)
+            next.set(uid, env.object)
+            return next
+          })
+        }
+      } catch (e) {
+        console.warn('event stream parse', e)
+      }
+    }
+    es.onerror = (e) => {
+      window.clearTimeout(emptyEventsTimer)
+      setEventsLoading(false)
+      setEventsError('Event stream interrupted; waiting for EventSource to reconnect')
+      console.warn('event stream error', e)
+    }
+    eventsEsRef.current = es
+    return () => {
+      window.clearTimeout(emptyEventsTimer)
+      es.close()
+      eventsEsRef.current = null
+    }
+  }, [ctx, resource, selectedItem, supportsEvents])
 
   return (
     <div className="app">
@@ -311,7 +405,10 @@ export default function App() {
                     className={selectedKey === key ? 'selected' : undefined}
                     onClick={() => setSelectedKey(prev => {
                       const next = prev === key ? null : key
-                      if (next !== prev) setShowFullDetails(false)
+                      if (next !== prev) {
+                        setShowFullDetails(false)
+                        setDetailsTab('yaml')
+                      }
                       return next
                     })}
                   >
@@ -327,16 +424,71 @@ export default function App() {
             <div className="details-header">
               <h2>{selectedItem.kind || resource}/{selectedItem.metadata?.name || selectedKey}</h2>
               <div className="details-actions">
-                <button type="button" onClick={() => setShowFullDetails(prev => !prev)}>
-                  {showFullDetails ? 'Hide housekeeping' : 'Show full YAML'}
-                </button>
+                {detailsTab === 'yaml' && (
+                  <button type="button" onClick={() => setShowFullDetails(prev => !prev)}>
+                    {showFullDetails ? 'Hide housekeeping' : 'Show full YAML'}
+                  </button>
+                )}
                 <button type="button" onClick={() => {
                   setSelectedKey(null)
                   setShowFullDetails(false)
+                  setDetailsTab('yaml')
                 }}>Close</button>
               </div>
             </div>
-            <pre>{stringify(detailsItem)}</pre>
+            <div className="details-tabs" role="tablist">
+              <button
+                type="button"
+                className={detailsTab === 'yaml' ? 'active' : undefined}
+                onClick={() => setDetailsTab('yaml')}
+              >
+                YAML
+              </button>
+              {supportsEvents && (
+                <button
+                  type="button"
+                  className={detailsTab === 'events' ? 'active' : undefined}
+                  onClick={() => setDetailsTab('events')}
+                >
+                  Events
+                </button>
+              )}
+            </div>
+            {detailsTab === 'yaml' && <pre>{stringify(detailsItem)}</pre>}
+            {detailsTab === 'events' && supportsEvents && (
+              <div className="event-details">
+                {eventsLoading && (
+                  <div className="inline-status">
+                    <span className="spinner" aria-hidden="true" />
+                    Loading events...
+                  </div>
+                )}
+                {eventsError && <div className="inline-error">{eventsError}</div>}
+                {!eventsLoading && sortedSelectedEvents.length === 0 && !eventsError && (
+                  <div className="empty-state">No events found for this resource.</div>
+                )}
+                {sortedSelectedEvents.length > 0 && (
+                  <table>
+                    <thead>
+                      <tr>
+                        {columnsByResource.events.map(column => (
+                          <th key={column.header} className={alignClass(column)}>{column.header}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedSelectedEvents.map((event: any) => (
+                        <tr key={objectKey(event)}>
+                          {columnsByResource.events.map(column => (
+                            <td key={column.header} className={alignClass(column)}>{column.value(event)}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
           </section>
         )}
       </main>
@@ -354,4 +506,16 @@ function sortItems(resource: string, values: any[]) {
 function eventTimestamp(o: any) {
   const timestamp = o.lastTimestamp || o.eventTime || o.metadata?.creationTimestamp
   return timestamp ? new Date(timestamp).getTime() : 0
+}
+
+function eventMatchesResource(event: any, resourceObject: any, resource: string) {
+  const involved = event.involvedObject || {}
+  const md = resourceObject.metadata || {}
+  if (involved.uid && md.uid) {
+    return involved.uid === md.uid
+  }
+  const expectedKind = resourceObject.kind || resourceKinds[resource]
+  return involved.name === md.name &&
+    involved.namespace === md.namespace &&
+    (!expectedKind || !involved.kind || involved.kind === expectedKind)
 }

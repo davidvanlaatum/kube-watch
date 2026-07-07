@@ -141,10 +141,41 @@ tr.selected { background: var(--row-selected) }
   border-radius: 4px;
   padding: 4px 8px;
 }
+.details-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+}
+.details-tabs button {
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.details-tabs button.active {
+  background: var(--row-selected);
+}
 .details-panel pre {
   margin: 0;
   padding: 12px;
   max-height: 32vh;
   overflow: auto;
   user-select: text;
+}
+.event-details {
+  max-height: 32vh;
+  overflow: auto;
+  padding: 12px;
+}
+.event-details table {
+  font-size: 13px;
+}
+.inline-status,
+.inline-error,
+.empty-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+.inline-error {
+  color: var(--error-foreground);
 }
