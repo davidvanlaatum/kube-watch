@@ -116,6 +116,12 @@ test('renders pod table, copy feedback, YAML details, events, and logs tab', asy
   const row = page.getByRole('row', { name: /api-7d9f/ })
   await expect(row).toContainText('2 (')
   await expect(row).toContainText('node-a')
+  await expect(page.getByText('1/1 shown')).toBeVisible()
+  await page.getByLabel('Name contains').fill('missing')
+  await expect(row).toBeHidden()
+  await expect(page.getByText('0/1 shown')).toBeVisible()
+  await page.getByRole('button', { name: 'Clear filters' }).click()
+  await expect(row).toBeVisible()
 
   const copyButton = row.getByRole('button', { name: 'Copy api-7d9f' })
   await copyButton.click()

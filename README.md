@@ -5,6 +5,7 @@ Overview
 - Vite + React frontend: proxies /api, /sse, and /logs during development and is embedded into the Go binary from web/dist for production.
 - Pod and Deployment details include a Logs tab that tails all containers, defaults to the last 200 lines, and live-follows new log lines.
 - Released binaries include build-time version metadata and the UI checks GitHub for newer releases.
+- Resource tables include client-side filters for name, status, labels, and resource-specific quick toggles such as pod restarts and readiness.
 
 Quick start (local)
 1. Ensure kubectl and gcloud (if using GKE) are installed and kubeconfig has contexts that can authenticate (gke-gcloud-auth-plugin supported by client-go exec plugin). Kubeconfig loading follows client-go/kubectl-style defaults, including `$KUBECONFIG` with multiple files and fallback to `~/.kube/config`.

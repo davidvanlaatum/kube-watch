@@ -87,6 +87,50 @@ header h1 { margin: 0; font-size: 18px }
 }
 main { padding: 12px }
 main.has-details { padding-bottom: 42vh }
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--row-border);
+  border-radius: 6px;
+  background: var(--panel-background);
+}
+.filter-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.filter-bar input[type="search"],
+.filter-bar select {
+  width: 180px;
+  background: var(--control-background);
+  color: var(--control-foreground);
+  border: 1px solid var(--control-border);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+.filter-bar select {
+  width: 220px;
+}
+.checkbox-filter input {
+  margin: 0;
+}
+.filter-bar button {
+  background: var(--control-background);
+  color: var(--control-foreground);
+  border: 1px solid var(--control-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+.filter-count {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--log-time);
+}
 .loading-banner,
 .error-banner {
   display: flex;

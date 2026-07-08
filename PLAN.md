@@ -47,7 +47,7 @@ Key design decisions
 Current status (2026-07-07)
 
 - Implemented: context discovery, namespaced list+watch, SSE endpoint, shared WatchManager, in-memory snapshot cache, frontend UI and proxy.
-- Working: client-go/kubectl-style kubeconfig loading, contexts listing, stable context ordering, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, Vite dev proxy for local testing, embedded production UI, YAML/details panel with resource-scoped events, Pod/Deployment logs with per-container tabs, build-time version display with GitHub update checks, structured slog lifecycle logs.
+- Working: client-go/kubectl-style kubeconfig loading, contexts listing, stable context ordering, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, client-side table filters, Vite dev proxy for local testing, embedded production UI, YAML/details panel with resource-scoped events, Pod/Deployment logs with per-container tabs, build-time version display with GitHub update checks, structured slog lifecycle logs.
 - CI: GitHub Actions runs Go tests, TypeScript type-checking, Vitest unit tests, Playwright Chromium tests, Vite build, and final Go binary build.
 - Known limitations:
   - Snapshot is memory-only (lost on restart).

@@ -31,6 +31,7 @@ Runbook (dev/test)
 - Check backend structured slog output on stdout; Vite dev server logs are available from `npm run dev`.
 - Kubeconfig loading should use client-go default loading rules so `$KUBECONFIG` multi-file setups match kubectl behavior.
 - Pod/Deployment log streaming uses `/logs/{context}/{resource}/{namespace}/{name}` and should preserve multiple-container behavior with container tabs.
+- Table filtering is client-side; keep name/status/label filters and resource-specific quick toggles consistent with displayed table semantics.
 - Release builds inject version metadata through GoReleaser ldflags; keep `/api/version` and the UI update notice working when changing release config.
 - Run checks before committing runtime changes: `go test ./...`, then from `/web` run `npm run typecheck`, `npm run test:unit`, `npm run test:e2e`, and relevant builds.
 

@@ -15,6 +15,13 @@ type Envelope = { type?: string; object?: any; error?: string; info?: string }
 type LogEnvelope = { type?: string; pod?: string; container?: string; timestamp?: string; line?: string; error?: string; info?: string; seq?: number }
 type LogEntry = { pod: string; container: string; timestamp: string; line: string; seq: number }
 type DetailsTab = 'yaml' | 'events' | 'logs'
+type TableFilters = {
+  name: string
+  status: string
+  labels: string
+  podRestartsOnly: boolean
+  notReadyOnly: boolean
+}
 type Column = {
   header: string
   value: (object: any, now: number) => React.ReactNode
@@ -37,6 +44,7 @@ const eventSupportedResources = new Set([
   'networkpolicies',
 ])
 const logSupportedResources = new Set(['pods', 'deployments'])
+const statusFilterResources = new Set(['pods', 'deployments', 'statefulsets', 'jobs', 'events'])
 const resourceKinds: Record<string, string> = {
   pods: 'Pod',
   deployments: 'Deployment',
@@ -220,16 +228,35 @@ function podStatus(o: any) {
   return waiting || terminated || o.status?.phase || ''
 }
 
+function resourceStatus(resource: string, object: any) {
+  if (resource === 'pods') return podStatus(object)
+  if (resource === 'jobs') return jobStatus(object)
+  if (resource === 'events') return object.type || ''
+  if (resource === 'deployments' || resource === 'statefulsets') {
+    return isReady(resource, object) ? 'Ready' : 'NotReady'
+  }
+  return object.status?.phase || object.status?.reason || ''
+}
+
+function isReady(resource: string, object: any) {
+  if (resource === 'pods') {
+    const statuses = object.status?.containerStatuses || []
+    const total = statuses.length || (object.spec?.containers?.length ?? 0)
+    return total > 0 && statuses.filter((s: any) => s.ready).length === total
+  }
+  if (resource === 'deployments' || resource === 'statefulsets') {
+    const desired = object.spec?.replicas ?? 0
+    const ready = object.status?.readyReplicas ?? 0
+    return ready >= desired
+  }
+  return true
+}
+
 function podRestarts(o: any, now: number) {
-  const statuses = [
-    ...(o.status?.initContainerStatuses || []),
-    ...(o.status?.containerStatuses || []),
-    ...(o.status?.ephemeralContainerStatuses || []),
-  ]
-  const restarts = statuses.reduce((sum: number, status: any) => sum + (status.restartCount || 0), 0)
+  const restarts = podRestartCount(o)
   if (restarts === 0) return 0
 
-  const lastRestartTime = statuses
+  const lastRestartTime = podStatuses(o)
     .map((status: any) => status.lastState?.terminated?.finishedAt)
     .filter(Boolean)
     .sort()
@@ -237,6 +264,107 @@ function podRestarts(o: any, now: number) {
   if (!lastRestartTime) return restarts
 
   return `${restarts} (${formatDurationSince(lastRestartTime, now)} ago)`
+}
+
+function podStatuses(o: any) {
+  return [
+    ...(o.status?.initContainerStatuses || []),
+    ...(o.status?.containerStatuses || []),
+    ...(o.status?.ephemeralContainerStatuses || []),
+  ]
+}
+
+function podRestartCount(o: any) {
+  return podStatuses(o).reduce((sum: number, status: any) => sum + (status.restartCount || 0), 0)
+}
+
+function labelsMatch(object: any, selector: string) {
+  const terms = selector.split(',').map(term => term.trim()).filter(Boolean)
+  if (terms.length === 0) return true
+  const labels = object.metadata?.labels || {}
+  return terms.every(term => {
+    const [key, value] = parseLabelFilterTerm(term)
+    if (!key) return true
+    if (value === undefined || value === '') return key in labels
+    return String(labels[key] ?? '') === value
+  })
+}
+
+function parseLabelFilterTerm(term: string): [string, string | undefined] {
+  const equalsIndex = term.indexOf('=')
+  if (equalsIndex >= 0) {
+    return [term.slice(0, equalsIndex).trim(), term.slice(equalsIndex + 1).trim()]
+  }
+  const colonIndex = term.indexOf(':')
+  if (colonIndex >= 0) {
+    return [term.slice(0, colonIndex).trim(), term.slice(colonIndex + 1).trim()]
+  }
+  return [term.trim(), undefined]
+}
+
+function labelSuggestions(objects: any[]) {
+  const suggestions = new Set<string>()
+  for (const object of objects) {
+    const labels = object.metadata?.labels || {}
+    for (const [key, value] of Object.entries(labels)) {
+      suggestions.add(key)
+      suggestions.add(`${key}=${value}`)
+      suggestions.add(`${key}: ${value}`)
+    }
+  }
+  return [...suggestions].sort().slice(0, 300)
+}
+
+function statusSuggestions(resource: string, objects: any[]) {
+  const common: Record<string, string[]> = {
+    pods: ['Running', 'Pending', 'Succeeded', 'Failed', 'Unknown', 'CrashLoopBackOff', 'ImagePullBackOff', 'ErrImagePull', 'ContainerCreating'],
+    deployments: ['Ready', 'NotReady'],
+    statefulsets: ['Ready', 'NotReady'],
+    jobs: ['Running', 'Complete', 'Failed'],
+    events: ['Normal', 'Warning'],
+  }
+  const suggestions = new Set(common[resource] || [])
+  for (const object of objects) {
+    const status = resourceStatus(resource, object)
+    if (status) suggestions.add(status)
+  }
+  return [...suggestions].sort()
+}
+
+function supportsStatusFilter(resource: string) {
+  return statusFilterResources.has(resource)
+}
+
+function matchesFilters(resource: string, object: any, filters: TableFilters) {
+  const nameFilter = filters.name.trim().toLowerCase()
+  if (nameFilter && !String(object.metadata?.name || '').toLowerCase().includes(nameFilter)) return false
+
+  const statusFilter = filters.status.trim().toLowerCase()
+  if (statusFilter && resourceStatus(resource, object).toLowerCase() !== statusFilter) return false
+
+  if (!labelsMatch(object, filters.labels)) return false
+
+  if (filters.podRestartsOnly && resource === 'pods' && podRestartCount(object) === 0) return false
+  if (filters.notReadyOnly && (resource === 'pods' || resource === 'deployments' || resource === 'statefulsets') && isReady(resource, object)) return false
+  return true
+}
+
+function hasActiveFilters(filters: TableFilters) {
+  return Boolean(
+    filters.name.trim() ||
+    filters.status.trim() ||
+    filters.labels.trim() ||
+    filters.podRestartsOnly ||
+    filters.notReadyOnly,
+  )
+}
+
+const emptyFilters: TableFilters = {
+  name: '',
+  status: '',
+  labels: '',
+  podRestartsOnly: false,
+  notReadyOnly: false,
 }
 
 function serviceExternalIP(o: any) {
@@ -394,6 +522,7 @@ export default function App() {
   const [ctx, setCtx] = useState<string>('')
   const [resource, setResource] = useState<string>('pods')
   const [now, setNow] = useState(Date.now())
+  const [filters, setFilters] = useState<TableFilters>(emptyFilters)
   const [items, setItems] = useState<Map<string, any>>(new Map())
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [detailsTab, setDetailsTab] = useState<DetailsTab>('yaml')
@@ -440,6 +569,7 @@ export default function App() {
       esRef.current = null
     }
     setItems(new Map())
+    setFilters(emptyFilters)
     setSelectedKey(null)
     setDetailsTab('yaml')
     setShowFullDetails(false)
@@ -503,7 +633,13 @@ export default function App() {
   }, [ctx, resource])
 
   const columns = columnsByResource[resource] || columnsByResource.pods
-  const sortedItems = sortItems(resource, [...items.values()])
+  const allItems = [...items.values()]
+  const labelsDatalistId = 'label-filter-suggestions'
+  const labelFilterSuggestions = useMemo(() => labelSuggestions(allItems), [allItems])
+  const showStatusFilter = supportsStatusFilter(resource)
+  const statusFilterSuggestions = useMemo(() => statusSuggestions(resource, allItems), [resource, allItems])
+  const filteredItems = allItems.filter(item => matchesFilters(resource, item, filters))
+  const sortedItems = sortItems(resource, filteredItems)
   const selectedItem = selectedKey ? items.get(selectedKey) : null
   const detailsItem = selectedItem && (showFullDetails ? selectedItem : cleanKubernetesObject(selectedItem))
   const supportsEvents = Boolean(selectedItem && eventSupportedResources.has(resource))
@@ -526,6 +662,12 @@ export default function App() {
         return a.seq - b.seq
       })
   }, [logEntries, activeLogContainer])
+
+  useEffect(() => {
+    if (!showStatusFilter && filters.status) {
+      setFilters(prev => ({ ...prev, status: '' }))
+    }
+  }, [filters.status, showStatusFilter])
 
   useEffect(() => {
     if (eventsEsRef.current) {
@@ -717,6 +859,88 @@ export default function App() {
           </div>
         )}
         {loadError && !isLoading && <div className="error-banner">{loadError}</div>}
+        <section className="filter-bar" aria-label="Table filters">
+          <label>
+            Name contains
+            <input
+              type="search"
+              value={filters.name}
+              onChange={event => setFilters(prev => ({ ...prev, name: event.target.value }))}
+              placeholder="api"
+            />
+          </label>
+          {showStatusFilter && (
+            <label>
+              Status equals
+              <select
+                value={filters.status}
+                onChange={event => setFilters(prev => ({ ...prev, status: event.target.value }))}
+              >
+                <option value="">Any status</option>
+                {statusFilterSuggestions.map(status => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label>
+            Labels
+            <input
+              type="search"
+              list={labelsDatalistId}
+              value={filters.labels}
+              onChange={event => setFilters(prev => ({ ...prev, labels: event.target.value }))}
+              placeholder="app.kubernetes.io/name: simtool-api"
+            />
+            <datalist id={labelsDatalistId}>
+              {labelFilterSuggestions.map(suggestion => (
+                <option key={suggestion} value={suggestion} />
+              ))}
+            </datalist>
+          </label>
+          <select
+            aria-label="Label suggestions"
+            value=""
+            onChange={event => {
+              if (event.target.value) {
+                setFilters(prev => ({ ...prev, labels: event.target.value }))
+              }
+            }}
+          >
+            <option value="">Label suggestions</option>
+            {labelFilterSuggestions.map(suggestion => (
+              <option key={suggestion} value={suggestion}>{suggestion}</option>
+            ))}
+          </select>
+          {resource === 'pods' && (
+            <label className="checkbox-filter">
+              <input
+                type="checkbox"
+                checked={filters.podRestartsOnly}
+                onChange={event => setFilters(prev => ({ ...prev, podRestartsOnly: event.target.checked }))}
+              />
+              Restarts &gt; 0
+            </label>
+          )}
+          {(resource === 'pods' || resource === 'deployments' || resource === 'statefulsets') && (
+            <label className="checkbox-filter">
+              <input
+                type="checkbox"
+                checked={filters.notReadyOnly}
+                onChange={event => setFilters(prev => ({ ...prev, notReadyOnly: event.target.checked }))}
+              />
+              Not ready
+            </label>
+          )}
+          {hasActiveFilters(filters) && (
+            <button type="button" onClick={() => setFilters(emptyFilters)}>
+              Clear filters
+            </button>
+          )}
+          <span className="filter-count">
+            {sortedItems.length}/{allItems.length} shown
+          </span>
+        </section>
         <section className="resource-table">
           <table>
             <thead>

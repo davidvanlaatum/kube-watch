@@ -26,6 +26,41 @@ class MockEventSource {
 let writeTextMock: ReturnType<typeof vi.fn>
 let fetchMock: ReturnType<typeof vi.fn>
 
+function podEvent(uid: string, name: string, options: {
+  labels?: Record<string, string>
+  phase?: string
+  ready?: boolean
+  restarts?: number
+  lastRestart?: string
+} = {}) {
+  const restarts = options.restarts ?? 0
+  return {
+    type: 'ADDED',
+    object: {
+      kind: 'Pod',
+      metadata: {
+        uid,
+        name,
+        namespace: 'default',
+        labels: options.labels,
+        creationTimestamp: '2026-07-07T23:00:00Z',
+      },
+      spec: {
+        nodeName: 'node-a',
+        containers: [{ name: 'api' }],
+      },
+      status: {
+        phase: options.phase || 'Running',
+        containerStatuses: [{
+          ready: options.ready ?? true,
+          restartCount: restarts,
+          lastState: options.lastRestart ? { terminated: { finishedAt: options.lastRestart } } : undefined,
+        }],
+      },
+    },
+  }
+}
+
 describe('App', () => {
   beforeEach(() => {
     MockEventSource.instances = []
@@ -103,6 +138,7 @@ describe('App', () => {
         },
       },
     })
+
     MockEventSource.instances[0].emit({ type: 'SYNCED' })
 
     const row = await screen.findByRole('row', { name: /api-7d9f/ })
@@ -116,6 +152,75 @@ describe('App', () => {
     await waitFor(() => {
       expect(within(row).getByRole('button', { name: 'Copy api-7d9f' })).toHaveTextContent('Copied')
     })
+  })
+
+  it('filters table rows by name, status, labels, restarts, and readiness', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect] = await screen.findAllByRole('combobox')
+    await user.selectOptions(contextSelect, 'dev')
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    MockEventSource.instances[0].emit(podEvent('pod-1', 'api-7d9f', {
+      labels: { app: 'api', 'app.kubernetes.io/name': 'simtool-api' },
+      restarts: 2,
+      lastRestart: '2026-07-07T23:55:00Z',
+    }))
+    MockEventSource.instances[0].emit(podEvent('pod-2', 'worker-55f8', {
+      labels: { app: 'worker', 'app.kubernetes.io/name': 'simtool-worker' },
+      phase: 'Pending',
+      ready: false,
+    }))
+    MockEventSource.instances[0].emit({ type: 'SYNCED' })
+
+    expect(await screen.findByRole('row', { name: /api-7d9f/ })).toBeInTheDocument()
+    expect(screen.getByRole('row', { name: /worker-55f8/ })).toBeInTheDocument()
+    expect(screen.getByText('2/2 shown')).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('Name contains'), 'api')
+    expect(screen.getByRole('row', { name: /api-7d9f/ })).toBeInTheDocument()
+    expect(screen.queryByRole('row', { name: /worker-55f8/ })).not.toBeInTheDocument()
+    expect(screen.getByText('1/2 shown')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(screen.getByRole('option', { name: 'Running' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Pending' })).toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Status equals'), 'Pending')
+    expect(screen.queryByRole('row', { name: /api-7d9f/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('row', { name: /worker-55f8/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(document.querySelector('option[value="app.kubernetes.io/name: simtool-api"]')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Labels'), 'app.kubernetes.io/name: simtool-api')
+    expect(screen.getByRole('row', { name: /api-7d9f/ })).toBeInTheDocument()
+    expect(screen.queryByRole('row', { name: /worker-55f8/ })).not.toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText('Label suggestions'), 'app.kubernetes.io/name: simtool-worker')
+    expect(screen.queryByRole('row', { name: /api-7d9f/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('row', { name: /worker-55f8/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }))
+    await user.click(screen.getByLabelText('Restarts > 0'))
+    expect(screen.getByRole('row', { name: /api-7d9f/ })).toBeInTheDocument()
+    expect(screen.queryByRole('row', { name: /worker-55f8/ })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }))
+    await user.click(screen.getByLabelText('Not ready'))
+    expect(screen.queryByRole('row', { name: /api-7d9f/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('row', { name: /worker-55f8/ })).toBeInTheDocument()
+  })
+
+  it('hides status filter for resources without status semantics', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    await screen.findAllByRole('combobox')
+    expect(screen.getByLabelText('Status equals')).toBeInTheDocument()
+
+    await user.selectOptions(screen.getAllByRole('combobox')[1], 'services')
+
+    expect(screen.queryByLabelText('Status equals')).not.toBeInTheDocument()
   })
 
   it('refreshes version status hourly', async () => {
