@@ -181,7 +181,22 @@ function podStatus(o: any) {
 }
 
 function podRestarts(o: any) {
-  return (o.status?.containerStatuses || []).reduce((sum: number, status: any) => sum + (status.restartCount || 0), 0)
+  const statuses = [
+    ...(o.status?.initContainerStatuses || []),
+    ...(o.status?.containerStatuses || []),
+    ...(o.status?.ephemeralContainerStatuses || []),
+  ]
+  const restarts = statuses.reduce((sum: number, status: any) => sum + (status.restartCount || 0), 0)
+  if (restarts === 0) return 0
+
+  const lastRestartTime = statuses
+    .map((status: any) => status.lastState?.terminated?.finishedAt)
+    .filter(Boolean)
+    .sort()
+    .at(-1)
+  if (!lastRestartTime) return restarts
+
+  return `${restarts} (${formatDurationSince(lastRestartTime)} ago)`
 }
 
 function serviceExternalIP(o: any) {
