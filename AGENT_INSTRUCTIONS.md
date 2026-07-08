@@ -11,7 +11,7 @@ Agent Persona
 Primary Objectives
 1. Ensure the Go backend reliably lists and watches namespaced Kubernetes resources and provides an in-memory snapshot for new subscribers.
 2. Keep the Vite + React frontend simple: connect to SSE, render a "top" view, and handle reconnects/fresh snapshots.
-3. Add CLI flags (port, log-level, persist-cache), and maintain Go, Vitest, and Playwright test coverage.
+3. Support resource details including YAML, events, and Pod/Deployment logs while maintaining Go, Vitest, and Playwright test coverage.
 
 What agents may do
 - Modify Go code in the repository root and frontend code under /web to fix bugs and add features per the project plan.
@@ -27,9 +27,10 @@ What agents must not do
 Runbook (dev/test)
 - Start backend: go run .
 - Start frontend (dev): cd web && npm install && npm run dev
-- Use the Vite dev server for browser/headless testing; it proxies API/SSE requests to the Go backend.
+- Use the Vite dev server for browser/headless testing; it proxies API/SSE/log requests to the Go backend.
 - Check backend structured slog output on stdout; Vite dev server logs are available from `npm run dev`.
 - Kubeconfig loading should use client-go default loading rules so `$KUBECONFIG` multi-file setups match kubectl behavior.
+- Pod/Deployment log streaming uses `/logs/{context}/{resource}/{namespace}/{name}` and should preserve multiple-container behavior with container tabs.
 - Run checks before committing runtime changes: `go test ./...`, then from `/web` run `npm run typecheck`, `npm run test:unit`, `npm run test:e2e`, and relevant builds.
 
 Testing guidance

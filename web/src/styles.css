@@ -18,6 +18,8 @@
   --error-background: #fef2f2;
   --error-border: #fecaca;
   --error-foreground: #991b1b;
+  --log-prefix: #2563eb;
+  --log-time: #64748b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -41,6 +43,8 @@
     --error-background: #450a0a;
     --error-border: #991b1b;
     --error-foreground: #fecaca;
+    --log-prefix: #93c5fd;
+    --log-time: #94a3b8;
   }
 }
 
@@ -184,6 +188,87 @@ tr.selected { background: var(--row-selected) }
   max-height: 32vh;
   overflow: auto;
   padding: 12px;
+}
+.log-details {
+  max-height: 32vh;
+  overflow: auto;
+  padding: 0 12px 12px;
+}
+.log-controls {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+  margin: 0 -12px 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-background);
+  box-shadow: 0 1px 0 var(--panel-border);
+}
+.log-options {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+.log-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.log-options input {
+  width: 88px;
+  background: var(--control-background);
+  color: var(--control-foreground);
+  border: 1px solid var(--control-border);
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+.container-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.container-tabs button {
+  flex: 0 0 auto;
+}
+.container-tabs button.active {
+  background: var(--row-selected);
+}
+.log-output {
+  min-height: 20vh;
+  padding: 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--background);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  user-select: text;
+}
+.log-line {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  white-space: pre-wrap;
+}
+.log-time {
+  color: var(--log-time);
+}
+.log-pod {
+  color: var(--log-prefix);
+  font-weight: 600;
+}
+.log-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .event-details table {
   font-size: 13px;

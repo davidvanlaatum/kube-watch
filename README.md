@@ -2,7 +2,8 @@ kube-watch — prototype
 
 Overview
 - Go backend: discovers kubeconfig contexts, opens watches to clusters/resources and exposes SSE endpoints over HTTPS (self-signed certs in ./certs).
-- Vite + React frontend: proxies /api and /sse during development and is embedded into the Go binary from web/dist for production.
+- Vite + React frontend: proxies /api, /sse, and /logs during development and is embedded into the Go binary from web/dist for production.
+- Pod and Deployment details include a Logs tab that tails all containers, defaults to the last 200 lines, and live-follows new log lines.
 
 Quick start (local)
 1. Ensure kubectl and gcloud (if using GKE) are installed and kubeconfig has contexts that can authenticate (gke-gcloud-auth-plugin supported by client-go exec plugin). Kubeconfig loading follows client-go/kubectl-style defaults, including `$KUBECONFIG` with multiple files and fallback to `~/.kube/config`.
@@ -45,6 +46,7 @@ Release build:
 Notes & next steps
 - Current implementation is a prototype: watches use dynamic client and basic list-then-watch logic with in-memory resume.
 - It supports: pods, deployments, statefulsets, replicasets, services, jobs, cronjobs, horizontal pod autoscalers, configmaps, secrets, serviceaccounts, poddisruptionbudgets, networkpolicies, events.
+- Logs are supported for pods and deployments. Pod logs stream every container in the selected pod. Deployment logs watch all currently matching pods, start following new matching pods, stop following removed pods, and group output by container name with pod-name prefixes.
 - Improvements: add informer factories, backpressure, per-resource rate limiting, authentication fallback, UI filters, and optional persisted snapshots.
 
 Troubleshooting & operational notes
@@ -57,6 +59,8 @@ Troubleshooting & operational notes
 - Snapshot cache behavior: the backend maintains an in-memory snapshot per (context,resource,namespace). When a new browser client subscribes it immediately receives the last-known ADDED/MODIFIED objects (so refreshing the page repopulates state). The snapshot is memory-resident and lost when the server restarts.
 
 - Reconnect behavior: watches are namespaced (per-context default namespace) to match RBAC-limited users. The server attempts to resume using resourceVersion when possible and re-lists on 410/Expired. Forbidden list/watch failures are treated as terminal for that subscription and surfaced to the UI.
+
+- Log streaming: `/logs/{context}/{resource}/{namespace}/{name}?tailLines=200` streams Server-Sent Events for pod/deployment logs. The UI lets you change `tailLines` up to 5000 and keeps following live output.
 
 Agent / operator instructions
 - Start backend interactively:

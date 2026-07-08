@@ -72,9 +72,24 @@ test.beforeEach(async ({ page }) => {
       ].join('\n\n'),
     })
   })
+
+  await page.route('**/logs/dev/pods/default/api-7d9f?tailLines=200', async route => {
+    const logEvents = Array.from({ length: 80 }, (_, index) => `data: ${JSON.stringify({
+      type: 'LOG',
+      pod: 'api-7d9f',
+      container: 'api',
+      timestamp: `2026-07-08T00:00:${String(index % 60).padStart(2, '0')}Z`,
+      line: `server line ${index + 1}`,
+      seq: index,
+    })}`)
+    await route.fulfill({
+      contentType: 'text/event-stream',
+      body: [...logEvents, ''].join('\n\n'),
+    })
+  })
 })
 
-test('renders pod table, copy feedback, YAML details, and resource events tab', async ({ page }) => {
+test('renders pod table, copy feedback, YAML details, events, and logs tab', async ({ page }) => {
   await page.goto('/')
 
   await page.getByRole('combobox').first().selectOption('dev')
@@ -94,4 +109,13 @@ test('renders pod table, copy feedback, YAML details, and resource events tab', 
 
   await page.getByRole('button', { name: 'Events' }).click()
   await expect(page.getByText('Started container api')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Logs' }).click()
+  await expect(page.getByRole('spinbutton')).toHaveValue('200')
+  await expect(page.getByRole('button', { name: 'api', exact: true })).toHaveClass(/active/)
+  await expect(page.getByLabel('Logs for api')).toContainText('api-7d9f: server line 80')
+  await expect(page.getByRole('button', { name: 'Auto scroll on' })).toBeVisible()
+  await expect.poll(async () => page.locator('.log-details').evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+  await page.getByRole('button', { name: 'Auto scroll on' }).click()
+  await expect(page.getByRole('button', { name: 'Auto scroll off' })).toBeVisible()
 })

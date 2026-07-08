@@ -110,4 +110,97 @@ describe('App', () => {
     })
     expect(screen.getByText('namespaced initial list failed: forbidden')).toBeInTheDocument()
   })
+
+  it('streams logs in container tabs with pod prefixes', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect] = await screen.findAllByRole('combobox')
+    await user.selectOptions(contextSelect, 'dev')
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    MockEventSource.instances[0].emit({
+      type: 'ADDED',
+      object: {
+        kind: 'Pod',
+        metadata: {
+          uid: 'pod-1',
+          name: 'api-7d9f',
+          namespace: 'default',
+          creationTimestamp: '2026-07-07T23:00:00Z',
+        },
+        spec: {
+          nodeName: 'node-a',
+          containers: [{ name: 'app' }, { name: 'sidecar' }],
+        },
+        status: {
+          phase: 'Running',
+          containerStatuses: [
+            { ready: true, restartCount: 0 },
+            { ready: true, restartCount: 0 },
+          ],
+        },
+      },
+    })
+    MockEventSource.instances[0].emit({ type: 'SYNCED' })
+
+    const row = await screen.findByRole('row', { name: /api-7d9f/ })
+    await user.click(row)
+    await user.click(screen.getByRole('button', { name: 'Logs' }))
+
+    await waitFor(() => {
+      expect(MockEventSource.instances.some(instance => instance.url === '/logs/dev/pods/default/api-7d9f?tailLines=200')).toBe(true)
+    })
+    const logsStream = MockEventSource.instances.find(instance => instance.url.startsWith('/logs/'))
+    expect(logsStream).toBeDefined()
+    expect(screen.getByRole('button', { name: 'app' })).toHaveClass('active')
+    expect(screen.getByRole('button', { name: 'sidecar' })).toBeInTheDocument()
+    expect(screen.getByText('Loading logs...')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Auto scroll on' })).toBeInTheDocument()
+
+    logsStream?.emit({ info: 'connected' })
+    expect(screen.getByText('Loading logs...')).toBeInTheDocument()
+    logsStream?.emit({ type: 'INFO', info: 'following logs for pod api-7d9f' })
+    expect(screen.getByText('Loading logs...')).toBeInTheDocument()
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(screen.getByText('Loading logs...')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Auto scroll on' }))
+    expect(screen.getByRole('button', { name: 'Auto scroll off' })).toBeInTheDocument()
+
+    logsStream?.emit({
+      type: 'LOG',
+      pod: 'api-7d9f',
+      container: 'app',
+      timestamp: '2026-07-08T00:00:02Z',
+      line: 'second',
+      seq: 1,
+    })
+    logsStream?.emit({
+      type: 'LOG',
+      pod: 'api-7d9f',
+      container: 'app',
+      timestamp: '2026-07-08T00:00:01Z',
+      line: 'first',
+      seq: 0,
+    })
+    logsStream?.emit({
+      type: 'LOG',
+      pod: 'api-7d9f',
+      container: 'sidecar',
+      timestamp: '2026-07-08T00:00:01Z',
+      line: 'sidecar line',
+      seq: 0,
+    })
+
+    const logOutput = await screen.findByLabelText('Logs for app')
+    await waitFor(() => {
+      expect(logOutput.textContent).toMatch(/api-7d9f: first[\s\S]*api-7d9f: second/)
+    })
+    expect(within(logOutput).getAllByText('api-7d9f:')[0]).toHaveClass('log-pod')
+    expect(logOutput).not.toHaveTextContent('sidecar line')
+
+    await user.click(screen.getByRole('button', { name: 'sidecar' }))
+    expect(await screen.findByLabelText('Logs for sidecar')).toHaveTextContent('api-7d9f: sidecar line')
+  })
 })

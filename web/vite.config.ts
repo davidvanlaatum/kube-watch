@@ -15,6 +15,11 @@ export default defineConfig(({mode}) => ({
         target: process.env.GO_BACKEND || 'https://localhost:9443',
         changeOrigin: true,
         secure: false,
+      },
+      '/logs': {
+        target: process.env.GO_BACKEND || 'https://localhost:9443',
+        changeOrigin: true,
+        secure: false,
       }
     }
   },

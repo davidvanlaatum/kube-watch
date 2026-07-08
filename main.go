@@ -14,9 +14,11 @@ import (
 	"log/slog"
 	"math/big"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,6 +76,7 @@ func main() {
 
 	// instantiate watch manager
 	wm := NewWatchManager(loadingRules)
+	lm := NewLogManager(loadingRules)
 
 	mux := http.NewServeMux()
 	distFS, err := fs.Sub(embeddedDist, "web/dist")
@@ -153,6 +156,71 @@ func main() {
 		}
 	})
 
+	mux.HandleFunc("/logs/", func(w http.ResponseWriter, r *http.Request) {
+		// URL format: /logs/{context}/{resource}/{namespace}/{name}
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/logs/"), "/")
+		if len(parts) < 4 {
+			http.Error(w, "expected /logs/{context}/{resource}/{namespace}/{name}", http.StatusBadRequest)
+			return
+		}
+		ctxName, err := urlPathSegment(parts[0])
+		if err != nil {
+			http.Error(w, "invalid context", http.StatusBadRequest)
+			return
+		}
+		resource, err := urlPathSegment(parts[1])
+		if err != nil {
+			http.Error(w, "invalid resource", http.StatusBadRequest)
+			return
+		}
+		namespace, err := urlPathSegment(parts[2])
+		if err != nil {
+			http.Error(w, "invalid namespace", http.StatusBadRequest)
+			return
+		}
+		name, err := urlPathSegment(parts[3])
+		if err != nil {
+			http.Error(w, "invalid name", http.StatusBadRequest)
+			return
+		}
+		if resource != "pods" && resource != "deployments" {
+			http.Error(w, "logs are supported for pods and deployments", http.StatusBadRequest)
+			return
+		}
+		tailLines := parseTailLines(r.URL.Query().Get("tailLines"))
+		ch, unsub, err := lm.Subscribe(ctxName, resource, namespace, name, tailLines)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("subscribe logs failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		defer unsub()
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		fmt.Fprintf(w, "data: %s\n\n", []byte("{\"info\":\"connected\"}"))
+		flusher.Flush()
+
+		notify := w.(http.CloseNotifier).CloseNotify()
+		for {
+			select {
+			case <-notify:
+				return
+			case b, ok := <-ch:
+				if !ok {
+					return
+				}
+				fmt.Fprintf(w, "data: %s\n\n", b)
+				flusher.Flush()
+			}
+		}
+	})
+
 	srv := &http.Server{
 		Addr:    ":9443",
 		Handler: cors(mux),
@@ -207,6 +275,31 @@ func contextSummaries(contexts []map[string]string) []string {
 		summaries = append(summaries, fmt.Sprintf("%s namespace=%s", ctx["name"], ctx["namespace"]))
 	}
 	return summaries
+}
+
+func urlPathSegment(segment string) (string, error) {
+	value, err := url.PathUnescape(segment)
+	if err != nil {
+		return "", err
+	}
+	if value == "" || strings.Contains(value, "/") {
+		return "", fmt.Errorf("invalid path segment")
+	}
+	return value, nil
+}
+
+func parseTailLines(value string) int64 {
+	if value == "" {
+		return 200
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		return 200
+	}
+	if parsed > 5000 {
+		return 5000
+	}
+	return parsed
 }
 
 // generate a minimal self-signed cert for localhost

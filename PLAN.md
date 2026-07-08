@@ -27,10 +27,11 @@ Architecture
   - HTTP(S) server: endpoints
     - /api/contexts => [{name, namespace}, ...]
     - /sse/{context}/{resource} => SSE event stream (ADDED/MODIFIED/DELETED + info/error messages)
+    - /logs/{context}/{resource}/{namespace}/{name}?tailLines=200 => SSE event stream for pod/deployment logs
   - TLS: self-signed certs in ./certs for local HTTPS.
 
 - Frontend (Vite + React + TypeScript)
-  - Vite dev server proxies /api and /sse to Go backend.
+  - Vite dev server proxies /api, /sse, and /logs to Go backend.
   - Production build outputs to web/dist and is embedded in the Go binary.
 
 Key design decisions
@@ -45,7 +46,7 @@ Key design decisions
 Current status (2026-07-07)
 
 - Implemented: context discovery, namespaced list+watch, SSE endpoint, shared WatchManager, in-memory snapshot cache, frontend UI and proxy.
-- Working: client-go/kubectl-style kubeconfig loading, contexts listing, stable context ordering, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, Vite dev proxy for local testing, embedded production UI, YAML/details panel with resource-scoped events, structured slog lifecycle logs.
+- Working: client-go/kubectl-style kubeconfig loading, contexts listing, stable context ordering, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, Vite dev proxy for local testing, embedded production UI, YAML/details panel with resource-scoped events, Pod/Deployment logs with per-container tabs, structured slog lifecycle logs.
 - CI: GitHub Actions runs Go tests, TypeScript type-checking, Vitest unit tests, Playwright Chromium tests, Vite build, and final Go binary build.
 - Known limitations:
   - Snapshot is memory-only (lost on restart).

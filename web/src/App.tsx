@@ -1,9 +1,11 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useMemo, useState, useRef } from 'react'
 import { stringify } from 'yaml'
 
 type ContextInfo = { name: string; namespace: string }
 type Envelope = { type?: string; object?: any; error?: string; info?: string }
-type DetailsTab = 'yaml' | 'events'
+type LogEnvelope = { type?: string; pod?: string; container?: string; timestamp?: string; line?: string; error?: string; info?: string; seq?: number }
+type LogEntry = { pod: string; container: string; timestamp: string; line: string; seq: number }
+type DetailsTab = 'yaml' | 'events' | 'logs'
 type Column = {
   header: string
   value: (object: any) => React.ReactNode
@@ -25,6 +27,7 @@ const eventSupportedResources = new Set([
   'poddisruptionbudgets',
   'networkpolicies',
 ])
+const logSupportedResources = new Set(['pods', 'deployments'])
 const resourceKinds: Record<string, string> = {
   pods: 'Pod',
   deployments: 'Deployment',
@@ -344,6 +347,33 @@ function cleanKubernetesObject(object: any) {
   return copy
 }
 
+function logContainerNames(object: any, resource: string, entries: LogEntry[]) {
+  const spec = resource === 'deployments' ? object?.spec?.template?.spec : object?.spec
+  const names = new Set<string>()
+  for (const container of [
+    ...(spec?.initContainers || []),
+    ...(spec?.containers || []),
+    ...(spec?.ephemeralContainers || []),
+  ]) {
+    if (container?.name) names.add(container.name)
+  }
+  for (const entry of entries) {
+    if (entry.container) names.add(entry.container)
+  }
+  return [...names].sort()
+}
+
+function logEntryKey(entry: LogEntry) {
+  return `${entry.timestamp}\u0000${entry.pod}\u0000${entry.container}\u0000${entry.line}`
+}
+
+function formatLogTimestamp(timestamp: string) {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return timestamp
+  return date.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 export default function App() {
   const [contexts, setContexts] = useState<ContextInfo[]>([])
   const [ctx, setCtx] = useState<string>('')
@@ -355,10 +385,18 @@ export default function App() {
   const [selectedEvents, setSelectedEvents] = useState<Map<string, any>>(new Map())
   const [eventsLoading, setEventsLoading] = useState(false)
   const [eventsError, setEventsError] = useState<string | null>(null)
+  const [logEntries, setLogEntries] = useState<LogEntry[]>([])
+  const [logsLoading, setLogsLoading] = useState(false)
+  const [logsError, setLogsError] = useState<string | null>(null)
+  const [activeLogContainer, setActiveLogContainer] = useState<string>('')
+  const [logTailLines, setLogTailLines] = useState(200)
+  const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
   const eventsEsRef = useRef<EventSource | null>(null)
+  const logsEsRef = useRef<EventSource | null>(null)
+  const logDetailsRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     fetch('/api/contexts').then(r => r.json()).then(setContexts).catch(console.error)
@@ -375,6 +413,9 @@ export default function App() {
     setSelectedKey(null)
     setDetailsTab('yaml')
     setShowFullDetails(false)
+    setLogEntries([])
+    setLogsError(null)
+    setActiveLogContainer('')
     setIsLoading(true)
     setLoadError(null)
     const url = `/sse/${encodeURIComponent(ctx)}/${encodeURIComponent(resource)}`
@@ -436,7 +477,25 @@ export default function App() {
   const selectedItem = selectedKey ? items.get(selectedKey) : null
   const detailsItem = selectedItem && (showFullDetails ? selectedItem : cleanKubernetesObject(selectedItem))
   const supportsEvents = Boolean(selectedItem && eventSupportedResources.has(resource))
+  const supportsLogs = Boolean(selectedItem && logSupportedResources.has(resource))
   const sortedSelectedEvents = sortItems('events', [...selectedEvents.values()])
+  const selectedName = selectedItem?.metadata?.name || ''
+  const selectedNamespace = selectedItem?.metadata?.namespace || ''
+  const logContainers = useMemo(
+    () => selectedItem ? logContainerNames(selectedItem, resource, logEntries) : [],
+    [selectedItem, resource, logEntries],
+  )
+  const logContainersKey = logContainers.join('\u0000')
+  const sortedLogEntries = useMemo(() => {
+    return logEntries
+      .filter(entry => entry.container === activeLogContainer)
+      .sort((a, b) => {
+        const timeCompare = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        if (timeCompare !== 0) return timeCompare
+        if (a.pod !== b.pod) return a.pod.localeCompare(b.pod)
+        return a.seq - b.seq
+      })
+  }, [logEntries, activeLogContainer])
 
   useEffect(() => {
     if (eventsEsRef.current) {
@@ -511,6 +570,76 @@ export default function App() {
     }
   }, [ctx, resource, selectedItem, supportsEvents])
 
+  useEffect(() => {
+    if (!logContainers.includes(activeLogContainer)) {
+      setActiveLogContainer(logContainers[0] || '')
+    }
+  }, [activeLogContainer, logContainers, logContainersKey])
+
+  useEffect(() => {
+    if (logsEsRef.current) {
+      logsEsRef.current.close()
+      logsEsRef.current = null
+    }
+    setLogEntries([])
+    setLogsError(null)
+
+    if (!ctx || !selectedName || !selectedNamespace || !supportsLogs || detailsTab !== 'logs') {
+      setLogsLoading(false)
+      return
+    }
+
+    setLogsLoading(true)
+    const url = `/logs/${encodeURIComponent(ctx)}/${encodeURIComponent(resource)}/${encodeURIComponent(selectedNamespace)}/${encodeURIComponent(selectedName)}?tailLines=${encodeURIComponent(String(logTailLines))}`
+    const es = new EventSource(url)
+    es.onmessage = (ev) => {
+      try {
+        const env: LogEnvelope = JSON.parse(ev.data)
+        if (env.type === 'LOG' && env.pod && env.container && env.line !== undefined) {
+          setLogsLoading(false)
+          setLogsError(null)
+          const entry: LogEntry = {
+            pod: env.pod,
+            container: env.container,
+            timestamp: env.timestamp || new Date().toISOString(),
+            line: env.line,
+            seq: env.seq || 0,
+          }
+          setLogEntries(prev => {
+            const key = logEntryKey(entry)
+            if (prev.some(existing => logEntryKey(existing) === key)) return prev
+            return [...prev, entry].slice(-10000)
+          })
+          return
+        }
+        if (env.type === 'INFO') {
+          return
+        }
+        if (env.type === 'ERROR' || env.error) {
+          setLogsLoading(false)
+          setLogsError(env.error || 'Log stream error')
+        }
+      } catch (e) {
+        console.warn('log stream parse', e)
+      }
+    }
+    es.onerror = (e) => {
+      setLogsLoading(false)
+      setLogsError('Log stream interrupted; waiting for EventSource to reconnect')
+      console.warn('log stream error', e)
+    }
+    logsEsRef.current = es
+    return () => {
+      es.close()
+      logsEsRef.current = null
+    }
+  }, [ctx, resource, selectedName, selectedNamespace, supportsLogs, detailsTab, logTailLines])
+
+  useEffect(() => {
+    if (!autoScrollLogs || !logDetailsRef.current) return
+    logDetailsRef.current.scrollTop = logDetailsRef.current.scrollHeight
+  }, [autoScrollLogs, sortedLogEntries.length, activeLogContainer])
+
   return (
     <div className="app">
       <header>
@@ -565,6 +694,9 @@ export default function App() {
                       if (next !== prev) {
                         setShowFullDetails(false)
                         setDetailsTab('yaml')
+                        setLogEntries([])
+                        setLogsError(null)
+                        setActiveLogContainer('')
                       }
                       return next
                     })}
@@ -610,6 +742,15 @@ export default function App() {
                   Events
                 </button>
               )}
+              {supportsLogs && (
+                <button
+                  type="button"
+                  className={detailsTab === 'logs' ? 'active' : undefined}
+                  onClick={() => setDetailsTab('logs')}
+                >
+                  Logs
+                </button>
+              )}
             </div>
             {detailsTab === 'yaml' && <pre>{stringify(detailsItem)}</pre>}
             {detailsTab === 'events' && supportsEvents && (
@@ -643,6 +784,71 @@ export default function App() {
                       ))}
                     </tbody>
                   </table>
+                )}
+              </div>
+            )}
+            {detailsTab === 'logs' && supportsLogs && (
+              <div ref={logDetailsRef} className="log-details">
+                <div className="log-controls">
+                  <div className="log-options">
+                    <label>
+                      Tail lines
+                      <input
+                        type="number"
+                        min="0"
+                        max="5000"
+                        value={logTailLines}
+                        onChange={(event) => {
+                          const next = Number.parseInt(event.target.value, 10)
+                          if (Number.isFinite(next)) {
+                            setLogTailLines(Math.max(0, Math.min(5000, next)))
+                          }
+                        }}
+                      />
+                    </label>
+                    <span>Live follow</span>
+                    <button type="button" onClick={() => setAutoScrollLogs(prev => !prev)}>
+                      Auto scroll {autoScrollLogs ? 'on' : 'off'}
+                    </button>
+                  </div>
+                  {logContainers.length > 0 && (
+                    <div className="container-tabs" role="tablist" aria-label="Log containers">
+                      {logContainers.map(container => (
+                        <button
+                          key={container}
+                          type="button"
+                          className={activeLogContainer === container ? 'active' : undefined}
+                          onClick={() => setActiveLogContainer(container)}
+                        >
+                          {container}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {logsLoading && (
+                  <div className="inline-status">
+                    <span className="spinner" aria-hidden="true" />
+                    Loading logs...
+                  </div>
+                )}
+                {logsError && <div className="inline-error">{logsError}</div>}
+                {!logsLoading && !logsError && logContainers.length === 0 && (
+                  <div className="empty-state">No containers found for this {resource === 'pods' ? 'pod' : 'deployment'}.</div>
+                )}
+                {!logsLoading && !logsError && logContainers.length > 0 && sortedLogEntries.length === 0 && (
+                  <div className="empty-state">Waiting for log lines for container {activeLogContainer}...</div>
+                )}
+                {sortedLogEntries.length > 0 && (
+                  <div className="log-output" aria-label={`Logs for ${activeLogContainer}`}>
+                    {sortedLogEntries.map(entry => (
+                      <div key={logEntryKey(entry)} className="log-line">
+                        <span className="log-time">{formatLogTimestamp(entry.timestamp)} </span>
+                        <span className="log-pod">{entry.pod}: </span>
+                        <span className="log-message">{entry.line}</span>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             )}

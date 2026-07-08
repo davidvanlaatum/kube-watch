@@ -131,6 +131,41 @@ func TestContextSummariesIncludesNameAndNamespace(t *testing.T) {
 	}
 }
 
+func TestParseTailLinesDefaultsAndCaps(t *testing.T) {
+	cases := []struct {
+		value string
+		want  int64
+	}{
+		{"", 200},
+		{"not-a-number", 200},
+		{"-1", 200},
+		{"0", 0},
+		{"50", 50},
+		{"9000", 5000},
+	}
+	for _, tc := range cases {
+		if got := parseTailLines(tc.value); got != tc.want {
+			t.Fatalf("parseTailLines(%q) = %d, expected %d", tc.value, got, tc.want)
+		}
+	}
+}
+
+func TestURLPathSegmentRejectsInvalidSegments(t *testing.T) {
+	value, err := urlPathSegment("dev%20cluster")
+	if err != nil {
+		t.Fatalf("expected escaped segment to decode: %v", err)
+	}
+	if value != "dev cluster" {
+		t.Fatalf("decoded value = %q", value)
+	}
+
+	for _, segment := range []string{"", "bad%2Fsegment", "%zz"} {
+		if _, err := urlPathSegment(segment); err == nil {
+			t.Fatalf("expected %q to be rejected", segment)
+		}
+	}
+}
+
 func TestGenerateSelfSignedCertCreatesParentDirectoryFiles(t *testing.T) {
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "cert.pem")
