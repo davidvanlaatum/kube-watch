@@ -12,7 +12,8 @@ Key rules
 Startup checklist for changes requiring runtime validation
 1. Run `go run .` in the repository root and confirm backend exposes /api/contexts, /api/version, /sse, and /logs endpoints.
 2. Run `npm run dev` in /web and open the frontend.
-3. Run relevant checks: `go test ./...`, then from `/web` run `npm run typecheck`, `npm run test:unit`, and `npm run test:e2e`.
+3. For release workflow changes, keep `kube-watch selfupdate` aligned with GoReleaser asset naming and checksums.
+4. Run relevant checks: `go test ./...`, then from `/web` run `npm run typecheck`, `npm run test:unit`, and `npm run test:e2e`.
 
 Error handling
 - Log and surface the exact APIStatus or error message from Kubernetes watches.
@@ -20,6 +21,7 @@ Error handling
 
 Files of interest
 - watchmgr.go — shared watches, snapshot cache, resume logic
+- selfupdate.go — GitHub Release download, checksum verification, and binary replacement
 - web/src/App.tsx — SSE handling and UI
 - PLAN.md / README.md — runbook and design decisions
 

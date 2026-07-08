@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -30,8 +29,14 @@ type VersionInfo struct {
 }
 
 type latestRelease struct {
-	TagName string `json:"tag_name"`
-	HTMLURL string `json:"html_url"`
+	TagName string         `json:"tag_name"`
+	HTMLURL string         `json:"html_url"`
+	Assets  []releaseAsset `json:"assets"`
+}
+
+type releaseAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
 type versionChecker struct {
@@ -79,24 +84,8 @@ func (c *versionChecker) Check(ctx context.Context) VersionInfo {
 }
 
 func (c *versionChecker) fetchLatest(ctx context.Context) (latestRelease, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
+	latest, err := fetchLatestRelease(ctx, c.client, c.url)
 	if err != nil {
-		return latestRelease{}, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "kube-watch/"+version)
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return latestRelease{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return latestRelease{}, fmt.Errorf("latest release check returned %s", resp.Status)
-	}
-
-	var latest latestRelease
-	if err := json.NewDecoder(resp.Body).Decode(&latest); err != nil {
 		return latestRelease{}, err
 	}
 	if latest.TagName == "" {

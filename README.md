@@ -45,6 +45,7 @@ Release build:
 - GoReleaser runs `npm ci --prefix web` and `npm run build --prefix web` before compiling so released binaries embed the production UI from `web/dist`.
 - GoReleaser injects version, commit, and build date into the binary. The UI reads `/api/version` and links to the latest GitHub Release when a newer version is available.
 - Release artifacts are built for Linux, macOS, and Windows on amd64 and arm64, with checksums uploaded to the GitHub Release.
+- To update an installed binary in place, run `kube-watch selfupdate`. It downloads the latest compatible GitHub Release asset, verifies it against `checksums.txt`, and replaces the current executable. Use `kube-watch selfupdate --force` to reinstall the latest release even when the current version is not older.
 
 Notes & next steps
 - Current implementation is a prototype: watches use dynamic client and basic list-then-watch logic with in-memory resume.
@@ -64,6 +65,8 @@ Troubleshooting & operational notes
 - Reconnect behavior: watches are namespaced (per-context default namespace) to match RBAC-limited users. The server attempts to resume using resourceVersion when possible and re-lists on 410/Expired. Forbidden list/watch failures are treated as terminal for that subscription and surfaced to the UI.
 
 - Log streaming: `/logs/{context}/{resource}/{namespace}/{name}?tailLines=200` streams Server-Sent Events for pod/deployment logs. The UI lets you change `tailLines` up to 5000 and keeps following live output.
+
+- Self-update: `kube-watch selfupdate` checks `https://github.com/davidvanlaatum/kube-watch/releases/latest`, selects the archive matching the current OS/architecture, verifies the SHA-256 checksum from the release, and swaps the running executable path. If installed in a protected directory, rerun with the permissions required to replace that file.
 
 Agent / operator instructions
 - Start backend interactively:

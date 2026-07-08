@@ -29,6 +29,7 @@ Architecture
     - /api/version => build metadata plus latest GitHub release update status
     - /sse/{context}/{resource} => SSE event stream (ADDED/MODIFIED/DELETED + info/error messages)
     - /logs/{context}/{resource}/{namespace}/{name}?tailLines=200 => SSE event stream for pod/deployment logs
+    - CLI command `selfupdate` => download latest compatible release, verify checksum, and replace the current binary
   - TLS: self-signed certs in ./certs for local HTTPS.
 
 - Frontend (Vite + React + TypeScript)
@@ -47,7 +48,7 @@ Key design decisions
 Current status (2026-07-07)
 
 - Implemented: context discovery, namespaced list+watch, SSE endpoint, shared WatchManager, in-memory snapshot cache, frontend UI and proxy.
-- Working: client-go/kubectl-style kubeconfig loading, contexts listing, stable context ordering, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, client-side table filters, Vite dev proxy for local testing, embedded production UI, YAML/details panel with resource-scoped events, Pod/Deployment logs with per-container tabs, build-time version display with GitHub update checks, structured slog lifecycle logs.
+- Working: client-go/kubectl-style kubeconfig loading, contexts listing, stable context ordering, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, client-side table filters, Vite dev proxy for local testing, embedded production UI, YAML/details panel with resource-scoped events, Pod/Deployment logs with per-container tabs, build-time version display with GitHub update checks, `selfupdate` release installation, structured slog lifecycle logs.
 - CI: GitHub Actions runs Go tests, TypeScript type-checking, Vitest unit tests, Playwright Chromium tests, Vite build, and final Go binary build.
 - Known limitations:
   - Snapshot is memory-only (lost on restart).

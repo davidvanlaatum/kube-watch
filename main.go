@@ -48,6 +48,17 @@ var supportedResources = map[string]schema.GroupVersionResource{
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "selfupdate", "self-update":
+			if err := runSelfUpdate(os.Args[2:], os.Stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "selfupdate failed: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
+
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	config, err := loadingRules.Load()
 	if err != nil {
