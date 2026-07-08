@@ -45,6 +45,7 @@ Current status (2026-07-07)
 
 - Implemented: context discovery, namespaced list+watch, SSE endpoint, shared WatchManager, in-memory snapshot cache, frontend UI and proxy.
 - Working: contexts listing, stable context ordering, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, Vite dev proxy for local testing, embedded production UI, YAML/details panel with resource-scoped events, structured slog lifecycle logs.
+- CI: GitHub Actions runs Go tests, TypeScript type-checking, Vitest unit tests, Playwright Chromium tests, Vite build, and final Go binary build.
 - Known limitations:
   - Snapshot is memory-only (lost on restart).
   - Multi-namespace cluster-wide view is limited when cluster-list is forbidden — current behavior watches the context default namespace.
@@ -55,7 +56,7 @@ Project milestones & plan
 1) Stabilize (Immediate, 1-3 days)
    - Add --log-level flag for structured slog output.
    - Ensure clear user-facing SSE info/error messages for additional APIStatus cases.
-   - Add tests: simple integration test that starts backend+frontend (HTTP), connects via SSE and asserts initial snapshot + an artificial event.
+   - Expand test coverage for watch reconnect/error paths and resource-specific table formatting.
 
 2) UX & functionality (Short-term, 1-2 weeks)
    - Multi-namespace selection UI: allow user to specify additional namespaces to watch for a context (with sensible limits).
@@ -91,9 +92,8 @@ Agent / Operator instructions (runbook)
   5. For GKE contexts: run `gcloud auth login` before starting backend if your kubeconfig uses gke-gcloud-auth-plugin.
 
 - Headless testing (Playwright)
-  - Force HTTP and set GO_BACKEND if needed:
-    GO_BACKEND=http://localhost:9443 npm run dev
-  - Ensure backend is reachable from the Playwright runner and gcloud credentials are available if using GKE.
+  - Default Playwright tests start the Vite dev server automatically and mock API/SSE responses.
+  - Use a real backend and GKE credentials only for explicit cluster integration tests.
 
 - Debugging tips
   - If SSE stream shows {"error":"namespaced initial list failed: ... exec plugin failed"}: run `gcloud auth login` and restart the backend.
@@ -103,7 +103,7 @@ Agent / Operator instructions (runbook)
 Contributing / PR checklist
 
 - Run the backend locally and validate the UI connects and receives initial snapshot.
-- Add unit tests for any non-trivial logic (watchEntry cache behavior, broadcast semantics).
+- Add unit, component, or Playwright tests for non-trivial logic and UI behavior.
 - Keep README.md, PLAN.md, and agent instructions current when behavior, setup, resource support, logging, or troubleshooting changes.
 - Follow the commit trailer convention when committing: include the Copilot Co-authored-by trailer if changes were assisted by the agent.
 

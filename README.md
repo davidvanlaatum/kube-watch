@@ -24,6 +24,19 @@ Production build:
    cd ..
    go build -o kube-watch .
 
+Tests:
+   go test ./...
+   cd web
+   npm ci
+   npm run typecheck
+   npm run test:unit
+   npx playwright install chromium
+   npm run test:e2e
+
+CI:
+- GitHub Actions runs on pushes to `main` and pull requests.
+- CI runs Go tests, web type-checking, Vitest unit tests, Playwright Chromium tests, the Vite production build, and the final Go binary build with embedded web assets.
+
 Release build:
 - Pushing a tag that matches `vX.X.X` runs GitHub Actions with GoReleaser.
 - GoReleaser runs `npm ci --prefix web` and `npm run build --prefix web` before compiling so released binaries embed the production UI from `web/dist`.
@@ -53,6 +66,6 @@ Agent / operator instructions
   npm install
   npm run dev
 
-- To run headless tests (Playwright) use HTTP and ensure GO_BACKEND points to your backend if needed.
+- Playwright tests start the Vite dev server automatically and mock API/SSE responses for deterministic UI coverage.
 
-If you'd like, I can add CLI flags for log level, snapshot persistence, or multi-namespace selection next.
+Next planned improvements include CLI flags for log level, snapshot persistence, and multi-namespace selection.

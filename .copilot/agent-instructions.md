@@ -12,7 +12,7 @@ Key rules
 Startup checklist for changes requiring runtime validation
 1. Run `go run .` in the repository root and confirm backend exposes /api/contexts and /sse endpoints.
 2. Run `npm run dev` in /web and open the frontend.
-3. Confirm Playwright test (if present) passes against the Vite dev server.
+3. Run relevant checks: `go test ./...`, then from `/web` run `npm run typecheck`, `npm run test:unit`, and `npm run test:e2e`.
 
 Error handling
 - Log and surface the exact APIStatus or error message from Kubernetes watches.
@@ -25,7 +25,7 @@ Files of interest
 
 When creating PRs
 - Include changelog notes and a short reproduction plan for runtime changes.
-- Add a Playwright or unit test when fixing watch/resume behaviors.
+- Add Go, Vitest, or Playwright coverage for behavior changes where practical.
 - Check docs for stale setup steps, resource lists, limitations, and troubleshooting guidance before committing.
 
 If you need more context

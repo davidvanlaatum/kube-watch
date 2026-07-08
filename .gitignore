@@ -8,6 +8,8 @@ web/node_modules/
 node_modules/
 web/dist/*
 !web/dist/placeholder.txt
+web/playwright-report/
+web/test-results/
 # ignore local dev certs and logs
 certs/
 *.log

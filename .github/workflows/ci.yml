@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Type-check web
+        run: npm run typecheck
+        working-directory: web
+
+      - name: Run web unit tests
+        run: npm run test:unit
+        working-directory: web
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: web
+
+      - name: Run Playwright tests
+        run: npm run test:e2e
+        working-directory: web
+
+      - name: Build web
+        run: npm run build
+        working-directory: web
+
+      - name: Build Go binary
+        run: go build -o kube-watch .
