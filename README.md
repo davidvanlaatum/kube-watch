@@ -7,6 +7,10 @@ Overview
 - Released binaries include build-time version metadata and the UI checks GitHub for newer releases.
 - Resource tables include client-side filters for name, status, labels, and resource-specific quick toggles such as pod restarts and readiness.
 
+Install
+- Prefer the pre-built binaries from GitHub Releases: https://github.com/davidvanlaatum/kube-watch/releases
+- Download the archive for your OS/architecture, extract `kube-watch`, and run it from your terminal. After installing, use `kube-watch selfupdate` to update in place.
+
 Quick start (local)
 1. Ensure kubectl and gcloud (if using GKE) are installed and kubeconfig has contexts that can authenticate (gke-gcloud-auth-plugin supported by client-go exec plugin). Kubeconfig loading follows client-go/kubectl-style defaults, including `$KUBECONFIG` with multiple files and fallback to `~/.kube/config`.
 
