@@ -39,12 +39,13 @@ Key design decisions
 - Namespaced default: respecting RBAC is a priority; the backend reads context default namespace and watches that namespace. If cluster-list is permitted, cluster-scoped list/watch can be used (previous behavior) but the default avoids Forbidden errors.
 - Shared watches: one watch per (context,resource,namespace) reduces duplicate API calls when multiple UI clients connect.
 - In-memory snapshot cache: new subscribers receive the latest ADDED/MODIFIED events so UI refresh/population works even if the watch started earlier.
+- Kubeconfig loading: client-go default loading rules are used so `$KUBECONFIG` multi-file configs and fallback to `~/.kube/config` behave like kubectl.
 - Exec plugin support: clientcmd.NewNonInteractiveDeferredLoadingClientConfig is used so exec plugins (gke-gcloud-auth-plugin) work, but the host must have gcloud and valid credentials (gcloud auth login) for GKE contexts.
 
 Current status (2026-07-07)
 
 - Implemented: context discovery, namespaced list+watch, SSE endpoint, shared WatchManager, in-memory snapshot cache, frontend UI and proxy.
-- Working: contexts listing, stable context ordering, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, Vite dev proxy for local testing, embedded production UI, YAML/details panel with resource-scoped events, structured slog lifecycle logs.
+- Working: client-go/kubectl-style kubeconfig loading, contexts listing, stable context ordering, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, Vite dev proxy for local testing, embedded production UI, YAML/details panel with resource-scoped events, structured slog lifecycle logs.
 - CI: GitHub Actions runs Go tests, TypeScript type-checking, Vitest unit tests, Playwright Chromium tests, Vite build, and final Go binary build.
 - Known limitations:
   - Snapshot is memory-only (lost on restart).

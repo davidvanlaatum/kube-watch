@@ -46,25 +46,20 @@ var supportedResources = map[string]schema.GroupVersionResource{
 }
 
 func main() {
-	kubeconfig := os.Getenv("KUBECONFIG")
-	if kubeconfig == "" {
-		home := os.Getenv("HOME")
-		kubeconfig = filepath.Join(home, ".kube", "config")
-	}
-
-	configBytes, err := os.ReadFile(kubeconfig)
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	config, err := loadingRules.Load()
 	if err != nil {
-		slog.Error("failed to read kubeconfig", "error", err)
+		slog.Error("failed to load kubeconfig", "paths", loadingRules.GetLoadingPrecedence(), "existing_paths", existingFiles(loadingRules.GetLoadingPrecedence()), "error", err)
 		os.Exit(1)
 	}
 
-	config, err := clientcmd.Load(configBytes)
-	if err != nil {
-		slog.Error("failed to parse kubeconfig", "error", err)
-		os.Exit(1)
+	contexts := listContexts(config, loadingRules)
+	slog.Info("loaded kubeconfig", "paths", loadingRules.GetLoadingPrecedence(), "existing_paths", existingFiles(loadingRules.GetLoadingPrecedence()), "context_count", len(contexts))
+	if len(contexts) == 0 {
+		slog.Warn("no kubeconfig contexts discovered", "paths", loadingRules.GetLoadingPrecedence(), "existing_paths", existingFiles(loadingRules.GetLoadingPrecedence()), "hint", "confirm the app process has the same KUBECONFIG environment as kubectl")
+	} else {
+		slog.Info("discovered kubeconfig contexts", "contexts", contextSummaries(contexts))
 	}
-
-	contexts := listContexts(config, kubeconfig)
 
 	// generate self-signed certs if not present
 	certPath := filepath.Join("./certs", "cert.pem")
@@ -78,7 +73,7 @@ func main() {
 	}
 
 	// instantiate watch manager
-	wm := NewWatchManager(kubeconfig)
+	wm := NewWatchManager(loadingRules)
 
 	mux := http.NewServeMux()
 	distFS, err := fs.Sub(embeddedDist, "web/dist")
@@ -173,7 +168,7 @@ func main() {
 	}
 }
 
-func listContexts(cfg *api.Config, kubeconfigPath string) []map[string]string {
+func listContexts(cfg *api.Config, loadingRules *clientcmd.ClientConfigLoadingRules) []map[string]string {
 	out := make([]map[string]string, 0, len(cfg.Contexts))
 	names := make([]string, 0, len(cfg.Contexts))
 	for k := range cfg.Contexts {
@@ -182,16 +177,36 @@ func listContexts(cfg *api.Config, kubeconfigPath string) []map[string]string {
 	sort.Strings(names)
 	for _, k := range names {
 		// attempt to read the namespace for this context
-		rules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath}
 		overrides := &clientcmd.ConfigOverrides{CurrentContext: k}
-		clientCfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
+		clientCfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides)
 		ns, _, err := clientCfg.Namespace()
 		if err != nil || ns == "" {
+			if err != nil {
+				slog.Warn("failed to resolve context namespace; using default namespace", "context", k, "error", err)
+			}
 			ns = "default"
 		}
 		out = append(out, map[string]string{"name": k, "namespace": ns})
 	}
 	return out
+}
+
+func existingFiles(paths []string) []string {
+	existing := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if _, err := os.Stat(path); err == nil {
+			existing = append(existing, path)
+		}
+	}
+	return existing
+}
+
+func contextSummaries(contexts []map[string]string) []string {
+	summaries := make([]string, 0, len(contexts))
+	for _, ctx := range contexts {
+		summaries = append(summaries, fmt.Sprintf("%s namespace=%s", ctx["name"], ctx["namespace"]))
+	}
+	return summaries
 }
 
 // generate a minimal self-signed cert for localhost

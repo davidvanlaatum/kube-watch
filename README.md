@@ -5,7 +5,7 @@ Overview
 - Vite + React frontend: proxies /api and /sse during development and is embedded into the Go binary from web/dist for production.
 
 Quick start (local)
-1. Ensure kubectl and gcloud (if using GKE) are installed and kubeconfig has contexts that can authenticate (gke-gcloud-auth-plugin supported by client-go exec plugin).
+1. Ensure kubectl and gcloud (if using GKE) are installed and kubeconfig has contexts that can authenticate (gke-gcloud-auth-plugin supported by client-go exec plugin). Kubeconfig loading follows client-go/kubectl-style defaults, including `$KUBECONFIG` with multiple files and fallback to `~/.kube/config`.
 
 2. Start Go backend (it will generate self-signed certs in ./certs):
    go mod tidy
@@ -51,6 +51,8 @@ Troubleshooting & operational notes
 - Logs: run the backend interactively with `go run .` to see structured slog output on stdout (recommended). Watch/subscription open/close, forbidden access, and reconnect conditions are logged with cluster, namespace, and resource fields.
 
 - gke / gcloud auth: contexts that use `gke-gcloud-auth-plugin` require `gcloud` credentials accessible to the Go process. Run `gcloud auth login` (interactive) before starting the backend so the exec plugin can obtain tokens.
+
+- kubeconfig loading: the backend uses client-go default loading rules, so it honors `$KUBECONFIG` including multiple files separated by the OS path-list separator (`:` on macOS/Linux) and falls back to `~/.kube/config`.
 
 - Snapshot cache behavior: the backend maintains an in-memory snapshot per (context,resource,namespace). When a new browser client subscribes it immediately receives the last-known ADDED/MODIFIED objects (so refreshing the page repopulates state). The snapshot is memory-resident and lost when the server restarts.
 

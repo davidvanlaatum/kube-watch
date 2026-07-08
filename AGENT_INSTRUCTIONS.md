@@ -29,6 +29,7 @@ Runbook (dev/test)
 - Start frontend (dev): cd web && npm install && npm run dev
 - Use the Vite dev server for browser/headless testing; it proxies API/SSE requests to the Go backend.
 - Check backend structured slog output on stdout; Vite dev server logs are available from `npm run dev`.
+- Kubeconfig loading should use client-go default loading rules so `$KUBECONFIG` multi-file setups match kubectl behavior.
 - Run checks before committing runtime changes: `go test ./...`, then from `/web` run `npm run typecheck`, `npm run test:unit`, `npm run test:e2e`, and relevant builds.
 
 Testing guidance

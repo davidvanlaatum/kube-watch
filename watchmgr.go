@@ -18,9 +18,9 @@ import (
 
 // WatchManager manages shared watches per cluster+resource and broadcasts events to subscribers.
 type WatchManager struct {
-	kubeconfigPath string
-	mu             sync.Mutex
-	entries        map[string]*watchEntry
+	loadingRules *clientcmd.ClientConfigLoadingRules
+	mu           sync.Mutex
+	entries      map[string]*watchEntry
 }
 
 type watchEntry struct {
@@ -42,8 +42,11 @@ type watchEntry struct {
 
 var syncedEvent = []byte(`{"type":"SYNCED"}`)
 
-func NewWatchManager(kubeconfigPath string) *WatchManager {
-	return &WatchManager{kubeconfigPath: kubeconfigPath, entries: make(map[string]*watchEntry)}
+func NewWatchManager(loadingRules *clientcmd.ClientConfigLoadingRules) *WatchManager {
+	if loadingRules == nil {
+		loadingRules = clientcmd.NewDefaultClientConfigLoadingRules()
+	}
+	return &WatchManager{loadingRules: loadingRules, entries: make(map[string]*watchEntry)}
 }
 
 func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource) (chan []byte, func(), error) {
@@ -53,9 +56,8 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 	if !ok {
 		// create entry
 		// build a client config loader so we can extract the default namespace for this context
-		rules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: m.kubeconfigPath}
 		over := &clientcmd.ConfigOverrides{CurrentContext: cluster}
-		clientCfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, over)
+		clientCfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(m.loadingRules, over)
 		cfg, err := clientCfg.ClientConfig()
 		if err != nil {
 			m.mu.Unlock()
@@ -96,7 +98,7 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 		}
 		e.mu.Unlock()
 		slog.Info("sse subscription opened", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "clients", clientCount)
-		go e.run(m.kubeconfigPath)
+		go e.run()
 		// return subscription
 		unsubscribe := func() {
 			e.mu.Lock()
@@ -183,7 +185,7 @@ func (e *watchEntry) stop() {
 	e.mu.Unlock()
 }
 
-func (e *watchEntry) run(kubeconfigPath string) {
+func (e *watchEntry) run() {
 	res := e.dyn.Resource(e.gvr)
 	ns := e.namespace
 	if ns == "" {
