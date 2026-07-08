@@ -12,3 +12,4 @@ web/dist/*
 certs/
 *.log
 kube-watch
+/scripts/fix-work-author-and-push.sh
