@@ -105,6 +105,26 @@ th, td { padding: 8px; border-bottom: 1px solid var(--row-border) }
 th { text-align: left }
 .align-center { text-align: center }
 .align-right { text-align: right }
+.name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.copy-name {
+  opacity: 0;
+  background: var(--control-background);
+  color: var(--control-foreground);
+  border: 1px solid var(--control-border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+tr:hover .copy-name,
+.copy-name:focus {
+  opacity: 1;
+}
 tbody tr { cursor: pointer }
 tr:hover { background: var(--row-hover) }
 tr.selected { background: var(--row-selected) }

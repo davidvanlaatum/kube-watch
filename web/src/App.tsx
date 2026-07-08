@@ -140,7 +140,35 @@ const columnsByResource: Record<string, Column[]> = {
 }
 
 function name(o: any) {
-  return o.metadata?.name || ''
+  const resourceName = o.metadata?.name || ''
+  return <NameCell name={resourceName} />
+}
+
+function NameCell({ name }: { name: string }) {
+  const [copied, setCopied] = useState(false)
+
+  return (
+    <span className="name-cell">
+      <span>{name}</span>
+      {name && (
+        <button
+          type="button"
+          className="copy-name"
+          title="Copy resource name"
+          aria-label={`Copy ${name}`}
+          onClick={(event) => {
+            event.stopPropagation()
+            void navigator.clipboard.writeText(name).then(() => {
+              setCopied(true)
+              window.setTimeout(() => setCopied(false), 1200)
+            })
+          }}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      )}
+    </span>
+  )
 }
 
 function age(o: any) {
