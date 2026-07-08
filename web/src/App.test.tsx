@@ -86,6 +86,9 @@ describe('App', () => {
     const row = await screen.findByRole('row', { name: /api-7d9f/ })
     expect(within(row).getByText('2 (5m ago)')).toBeInTheDocument()
 
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(within(row).getByText('2 (6m ago)')).toBeInTheDocument()
+
     await user.click(within(row).getByRole('button', { name: 'Copy api-7d9f' }))
 
     await waitFor(() => {

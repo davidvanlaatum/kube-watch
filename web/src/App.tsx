@@ -8,7 +8,7 @@ type LogEntry = { pod: string; container: string; timestamp: string; line: strin
 type DetailsTab = 'yaml' | 'events' | 'logs'
 type Column = {
   header: string
-  value: (object: any) => React.ReactNode
+  value: (object: any, now: number) => React.ReactNode
   align?: 'left' | 'center' | 'right'
 }
 
@@ -174,8 +174,8 @@ function NameCell({ name }: { name: string }) {
   )
 }
 
-function age(o: any) {
-  return formatDurationSince(o.metadata?.creationTimestamp)
+function age(o: any, now: number) {
+  return formatDurationSince(o.metadata?.creationTimestamp, now)
 }
 
 function duration(o: any) {
@@ -184,12 +184,12 @@ function duration(o: any) {
   return start && end ? formatDurationBetween(start, end) : '<none>'
 }
 
-function lastSchedule(o: any) {
-  return o.status?.lastScheduleTime ? formatDurationSince(o.status.lastScheduleTime) : '<none>'
+function lastSchedule(o: any, now: number) {
+  return o.status?.lastScheduleTime ? formatDurationSince(o.status.lastScheduleTime, now) : '<none>'
 }
 
-function eventLastSeen(o: any) {
-  return formatDurationSince(o.lastTimestamp || o.eventTime || o.metadata?.creationTimestamp)
+function eventLastSeen(o: any, now: number) {
+  return formatDurationSince(o.lastTimestamp || o.eventTime || o.metadata?.creationTimestamp, now)
 }
 
 function eventObject(o: any) {
@@ -211,7 +211,7 @@ function podStatus(o: any) {
   return waiting || terminated || o.status?.phase || ''
 }
 
-function podRestarts(o: any) {
+function podRestarts(o: any, now: number) {
   const statuses = [
     ...(o.status?.initContainerStatuses || []),
     ...(o.status?.containerStatuses || []),
@@ -227,7 +227,7 @@ function podRestarts(o: any) {
     .at(-1)
   if (!lastRestartTime) return restarts
 
-  return `${restarts} (${formatDurationSince(lastRestartTime)} ago)`
+  return `${restarts} (${formatDurationSince(lastRestartTime, now)} ago)`
 }
 
 function serviceExternalIP(o: any) {
@@ -299,9 +299,9 @@ function metricTargetValue(target?: any) {
     '<unknown>'
 }
 
-function formatDurationSince(timestamp?: string) {
+function formatDurationSince(timestamp: string | undefined, now = Date.now()) {
   if (!timestamp) return ''
-  return formatMillis(Date.now() - new Date(timestamp).getTime())
+  return formatMillis(now - new Date(timestamp).getTime())
 }
 
 function formatDurationBetween(start: string, end: string) {
@@ -378,6 +378,7 @@ export default function App() {
   const [contexts, setContexts] = useState<ContextInfo[]>([])
   const [ctx, setCtx] = useState<string>('')
   const [resource, setResource] = useState<string>('pods')
+  const [now, setNow] = useState(Date.now())
   const [items, setItems] = useState<Map<string, any>>(new Map())
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [detailsTab, setDetailsTab] = useState<DetailsTab>('yaml')
@@ -400,6 +401,11 @@ export default function App() {
 
   useEffect(() => {
     fetch('/api/contexts').then(r => r.json()).then(setContexts).catch(console.error)
+  }, [])
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000)
+    return () => window.clearInterval(id)
   }, [])
 
   useEffect(() => {
@@ -701,7 +707,7 @@ export default function App() {
                       return next
                     })}
                   >
-                    {columns.map(column => <td key={column.header} className={alignClass(column)}>{column.value(o)}</td>)}
+                    {columns.map(column => <td key={column.header} className={alignClass(column)}>{column.value(o, now)}</td>)}
                   </tr>
                 )
               })}
@@ -778,7 +784,7 @@ export default function App() {
                       {sortedSelectedEvents.map((event: any) => (
                         <tr key={objectKey(event)}>
                           {columnsByResource.events.map(column => (
-                            <td key={column.header} className={alignClass(column)}>{column.value(event)}</td>
+                            <td key={column.header} className={alignClass(column)}>{column.value(event, now)}</td>
                           ))}
                         </tr>
                       ))}
