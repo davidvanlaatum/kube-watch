@@ -77,6 +77,7 @@ func main() {
 	// instantiate watch manager
 	wm := NewWatchManager(loadingRules)
 	lm := NewLogManager(loadingRules)
+	vc := newVersionChecker()
 
 	mux := http.NewServeMux()
 	distFS, err := fs.Sub(embeddedDist, "web/dist")
@@ -103,6 +104,11 @@ func main() {
 	mux.HandleFunc("/api/contexts", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(contexts)
+	})
+
+	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(vc.Check(r.Context()))
 	})
 
 	mux.HandleFunc("/sse/", func(w http.ResponseWriter, r *http.Request) {
@@ -229,7 +235,7 @@ func main() {
 	cert, _ := tls.LoadX509KeyPair(certPath, keyPath)
 	srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
 
-	slog.Info("server listening", "addr", "https://localhost:9443", "endpoints", "/api/contexts,/sse/{context}/{resource}")
+	slog.Info("server listening", "addr", "https://localhost:9443", "endpoints", "/api/contexts,/api/version,/sse/{context}/{resource},/logs/{context}/{resource}/{namespace}/{name}")
 	if err := srv.ListenAndServeTLS("", ""); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)

@@ -64,6 +64,21 @@ header {
   justify-content:space-between;
 }
 header h1 { margin: 0; font-size: 18px }
+.title-block {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.version-status {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+.version-status a {
+  color: #fbbf24;
+  font-weight: 600;
+}
 .controls select {
   margin-left: 8px;
   background: var(--control-background);

@@ -4,6 +4,7 @@ Overview
 - Go backend: discovers kubeconfig contexts, opens watches to clusters/resources and exposes SSE endpoints over HTTPS (self-signed certs in ./certs).
 - Vite + React frontend: proxies /api, /sse, and /logs during development and is embedded into the Go binary from web/dist for production.
 - Pod and Deployment details include a Logs tab that tails all containers, defaults to the last 200 lines, and live-follows new log lines.
+- Released binaries include build-time version metadata and the UI checks GitHub for newer releases.
 
 Quick start (local)
 1. Ensure kubectl and gcloud (if using GKE) are installed and kubeconfig has contexts that can authenticate (gke-gcloud-auth-plugin supported by client-go exec plugin). Kubeconfig loading follows client-go/kubectl-style defaults, including `$KUBECONFIG` with multiple files and fallback to `~/.kube/config`.
@@ -41,6 +42,7 @@ CI:
 Release build:
 - Pushing a tag that matches `vX.X.X` runs GitHub Actions with GoReleaser.
 - GoReleaser runs `npm ci --prefix web` and `npm run build --prefix web` before compiling so released binaries embed the production UI from `web/dist`.
+- GoReleaser injects version, commit, and build date into the binary. The UI reads `/api/version` and links to the latest GitHub Release when a newer version is available.
 - Release artifacts are built for Linux, macOS, and Windows on amd64 and arm64, with checksums uploaded to the GitHub Release.
 
 Notes & next steps

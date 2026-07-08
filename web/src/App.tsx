@@ -2,6 +2,15 @@ import React, { useEffect, useMemo, useState, useRef } from 'react'
 import { stringify } from 'yaml'
 
 type ContextInfo = { name: string; namespace: string }
+type VersionInfo = {
+  version: string
+  commit: string
+  date: string
+  latestVersion?: string
+  latestUrl?: string
+  updateAvailable: boolean
+  checkError?: string
+}
 type Envelope = { type?: string; object?: any; error?: string; info?: string }
 type LogEnvelope = { type?: string; pod?: string; container?: string; timestamp?: string; line?: string; error?: string; info?: string; seq?: number }
 type LogEntry = { pod: string; container: string; timestamp: string; line: string; seq: number }
@@ -374,8 +383,14 @@ function formatLogTimestamp(timestamp: string) {
   return date.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+function versionLabel(version: string) {
+  if (!version || version === 'dev') return 'dev'
+  return version.startsWith('v') ? version : `v${version}`
+}
+
 export default function App() {
   const [contexts, setContexts] = useState<ContextInfo[]>([])
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null)
   const [ctx, setCtx] = useState<string>('')
   const [resource, setResource] = useState<string>('pods')
   const [now, setNow] = useState(Date.now())
@@ -401,6 +416,15 @@ export default function App() {
 
   useEffect(() => {
     fetch('/api/contexts').then(r => r.json()).then(setContexts).catch(console.error)
+  }, [])
+
+  useEffect(() => {
+    const fetchVersion = () => {
+      fetch('/api/version').then(r => r.json()).then(setVersionInfo).catch(console.error)
+    }
+    fetchVersion()
+    const id = window.setInterval(fetchVersion, 60 * 60 * 1000)
+    return () => window.clearInterval(id)
   }, [])
 
   useEffect(() => {
@@ -649,7 +673,19 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <h1>kube-watch</h1>
+        <div className="title-block">
+          <h1>kube-watch</h1>
+          {versionInfo && (
+            <div className="version-status">
+              <span>{versionLabel(versionInfo.version)}</span>
+              {versionInfo.updateAvailable && versionInfo.latestVersion && versionInfo.latestUrl && (
+                <a href={versionInfo.latestUrl} target="_blank" rel="noreferrer">
+                  Update available: {versionInfo.latestVersion}
+                </a>
+              )}
+            </div>
+          )}
+        </div>
         <div className="controls">
           <select value={ctx} onChange={e=>setCtx(e.target.value)}>
             <option value="">Select context</option>

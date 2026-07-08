@@ -24,15 +24,32 @@ class MockEventSource {
 }
 
 let writeTextMock: ReturnType<typeof vi.fn>
+let fetchMock: ReturnType<typeof vi.fn>
 
 describe('App', () => {
   beforeEach(() => {
     MockEventSource.instances = []
     writeTextMock = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('EventSource', MockEventSource)
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      json: () => Promise.resolve([{ name: 'dev', namespace: 'default' }]),
-    }))
+    fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/version') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            version: '1.0.0',
+            commit: 'abc123',
+            date: '2026-07-08T00:00:00Z',
+            latestVersion: 'v1.1.0',
+            latestUrl: 'https://github.com/davidvanlaatum/kube-watch/releases/tag/v1.1.0',
+            updateAvailable: true,
+          }),
+        })
+      }
+      return Promise.resolve({
+        json: () => Promise.resolve([{ name: 'dev', namespace: 'default' }]),
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: {
@@ -54,6 +71,11 @@ describe('App', () => {
     render(<App />)
 
     const [contextSelect] = await screen.findAllByRole('combobox')
+    expect(await screen.findByText('v1.0.0')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Update available: v1.1.0' })).toHaveAttribute(
+      'href',
+      'https://github.com/davidvanlaatum/kube-watch/releases/tag/v1.1.0',
+    )
     await user.selectOptions(contextSelect, 'dev')
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
 
@@ -94,6 +116,17 @@ describe('App', () => {
     await waitFor(() => {
       expect(within(row).getByRole('button', { name: 'Copy api-7d9f' })).toHaveTextContent('Copied')
     })
+  })
+
+  it('refreshes version status hourly', async () => {
+    render(<App />)
+
+    expect(await screen.findByText('v1.0.0')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.filter(call => call[0] === '/api/version')).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+
+    expect(fetchMock.mock.calls.filter(call => call[0] === '/api/version')).toHaveLength(2)
   })
 
   it('shows terminal stream errors and clears loading', async () => {

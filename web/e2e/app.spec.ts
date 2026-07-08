@@ -31,6 +31,20 @@ test.beforeEach(async ({ page }) => {
     })
   })
 
+  await page.route('**/api/version', async route => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        version: '1.0.0',
+        commit: 'abc123',
+        date: '2026-07-08T00:00:00Z',
+        latestVersion: 'v1.1.0',
+        latestUrl: 'https://github.com/davidvanlaatum/kube-watch/releases/tag/v1.1.0',
+        updateAvailable: true,
+      }),
+    })
+  })
+
   await page.route('**/sse/dev/pods', async route => {
     await route.fulfill({
       contentType: 'text/event-stream',
@@ -92,6 +106,11 @@ test.beforeEach(async ({ page }) => {
 test('renders pod table, copy feedback, YAML details, events, and logs tab', async ({ page }) => {
   await page.goto('/')
 
+  await expect(page.getByText('v1.0.0')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Update available: v1.1.0' })).toHaveAttribute(
+    'href',
+    'https://github.com/davidvanlaatum/kube-watch/releases/tag/v1.1.0',
+  )
   await page.getByRole('combobox').first().selectOption('dev')
 
   const row = page.getByRole('row', { name: /api-7d9f/ })
