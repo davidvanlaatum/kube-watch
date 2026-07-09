@@ -132,6 +132,107 @@ func TestSelfUpdaterDownloadsVerifiesAndReplacesBinary(t *testing.T) {
 	}
 }
 
+func TestSelfUpdaterSkipsWhenAlreadyCurrent(t *testing.T) {
+	oldVersion := version
+	version = "1.2.4"
+	t.Cleanup(func() { version = oldVersion })
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/latest" {
+			t.Fatalf("unexpected download request to %s", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"tag_name":"v1.2.4","assets":[]}`)
+	}))
+	defer server.Close()
+	replaced := false
+	updater := &selfUpdater{
+		client:     server.Client(),
+		releaseURL: server.URL + "/latest",
+		goos:       "darwin",
+		goarch:     "arm64",
+		executable: func() (string, error) { return "/tmp/kube-watch", nil },
+		replace: func(string, []byte) error {
+			replaced = true
+			return nil
+		},
+	}
+
+	result, err := updater.Update(t.Context(), selfUpdateOptions{})
+	if err != nil {
+		t.Fatalf("self update: %v", err)
+	}
+	if !strings.Contains(result, "already up to date") {
+		t.Fatalf("result = %q", result)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, expected only latest check", requests)
+	}
+	if replaced {
+		t.Fatal("replace should not be called when already current")
+	}
+}
+
+func TestSelfUpdaterForceReinstallsCurrentVersion(t *testing.T) {
+	oldVersion := version
+	version = "1.2.4"
+	t.Cleanup(func() { version = oldVersion })
+
+	newBinary := []byte("current binary")
+	archiveBytes := makeTarGz(t, "kube-watch", newBinary)
+	sum := sha256.Sum256(archiveBytes)
+	checksums := fmt.Sprintf("%s  kube-watch_1.2.4_darwin_arm64.tar.gz\n", hex.EncodeToString(sum[:]))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/latest":
+			fmt.Fprintf(w, `{
+				"tag_name": "v1.2.4",
+				"assets": [
+					{"name": "kube-watch_1.2.4_darwin_arm64.tar.gz", "browser_download_url": "%s/archive"},
+					{"name": "checksums.txt", "browser_download_url": "%s/checksums"}
+				]
+			}`, serverURL(r), serverURL(r))
+		case "/archive":
+			w.Write(archiveBytes)
+		case "/checksums":
+			fmt.Fprint(w, checksums)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	replaced := false
+	updater := &selfUpdater{
+		client:     server.Client(),
+		releaseURL: server.URL + "/latest",
+		goos:       "darwin",
+		goarch:     "arm64",
+		executable: func() (string, error) { return "/tmp/kube-watch", nil },
+		replace: func(_ string, b []byte) error {
+			replaced = bytes.Equal(b, newBinary)
+			return nil
+		},
+	}
+
+	if _, err := updater.Update(t.Context(), selfUpdateOptions{force: true}); err != nil {
+		t.Fatalf("force self update: %v", err)
+	}
+	if !replaced {
+		t.Fatal("expected force update to replace binary")
+	}
+}
+
+func TestSelfUpdaterRejectsWindows(t *testing.T) {
+	updater := &selfUpdater{goos: "windows"}
+
+	_, err := updater.Update(t.Context(), selfUpdateOptions{})
+
+	if err == nil || !strings.Contains(err.Error(), "not supported on Windows") {
+		t.Fatalf("expected Windows selfupdate unsupported error, got %v", err)
+	}
+}
+
 func TestReplaceExecutableSwapsBinary(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "kube-watch")

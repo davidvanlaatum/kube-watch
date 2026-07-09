@@ -66,6 +66,10 @@ func newSelfUpdater() *selfUpdater {
 }
 
 func (u *selfUpdater) Update(ctx context.Context, opts selfUpdateOptions) (string, error) {
+	if u.goos == "windows" {
+		return "", errors.New("selfupdate is not supported on Windows; download the latest Windows archive from GitHub Releases and replace kube-watch.exe manually")
+	}
+
 	latest, err := fetchLatestRelease(ctx, u.client, u.releaseURL)
 	if err != nil {
 		return "", err

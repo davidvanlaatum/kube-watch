@@ -501,7 +501,7 @@ function logContainerNames(object: any, resource: string, entries: LogEntry[]) {
 }
 
 function logEntryKey(entry: LogEntry) {
-  return `${entry.timestamp}\u0000${entry.pod}\u0000${entry.container}\u0000${entry.line}`
+  return `${entry.timestamp}\u0000${entry.pod}\u0000${entry.container}\u0000${entry.seq}\u0000${entry.line}`
 }
 
 function formatLogTimestamp(timestamp: string) {

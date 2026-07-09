@@ -7,17 +7,17 @@ export default defineConfig(({mode}) => ({
     port: 5173,
     proxy: {
       '/api': {
-        target: process.env.GO_BACKEND || 'https://localhost:9443',
+        target: process.env.GO_BACKEND || 'https://127.0.0.1:9443',
         changeOrigin: true,
         secure: false,
       },
       '/sse': {
-        target: process.env.GO_BACKEND || 'https://localhost:9443',
+        target: process.env.GO_BACKEND || 'https://127.0.0.1:9443',
         changeOrigin: true,
         secure: false,
       },
       '/logs': {
-        target: process.env.GO_BACKEND || 'https://localhost:9443',
+        target: process.env.GO_BACKEND || 'https://127.0.0.1:9443',
         changeOrigin: true,
         secure: false,
       }

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -166,6 +168,22 @@ func TestURLPathSegmentRejectsInvalidSegments(t *testing.T) {
 	}
 }
 
+func TestEscapedPathSegmentsPreservesEncodedSlashesInContext(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/sse/dev%2Fcluster/pods", nil)
+
+	parts := escapedPathSegments(req, "/sse/")
+	if len(parts) != 2 {
+		t.Fatalf("parts = %#v, expected 2 segments", parts)
+	}
+	contextName, err := urlPathValue(parts[0])
+	if err != nil {
+		t.Fatalf("decode context: %v", err)
+	}
+	if contextName != "dev/cluster" {
+		t.Fatalf("context = %q", contextName)
+	}
+}
+
 func TestGenerateSelfSignedCertCreatesParentDirectoryFiles(t *testing.T) {
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "cert.pem")
@@ -182,5 +200,67 @@ func TestGenerateSelfSignedCertCreatesParentDirectoryFiles(t *testing.T) {
 		if info.Size() == 0 {
 			t.Fatalf("expected %s to be non-empty", path)
 		}
+	}
+	keyInfo, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatalf("stat key: %v", err)
+	}
+	if got := keyInfo.Mode().Perm(); got != 0600 {
+		t.Fatalf("key mode = %o, expected 0600", got)
+	}
+}
+
+func TestEnsureTLSFilePermissionsTightensExistingKey(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "key.pem")
+	if err := os.WriteFile(keyPath, []byte("key"), 0644); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+
+	if err := ensureTLSFilePermissions(keyPath); err != nil {
+		t.Fatalf("ensure permissions: %v", err)
+	}
+
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatalf("stat key: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("key mode = %o, expected 0600", got)
+	}
+}
+
+func TestCORSAllowsOnlyLoopbackOrigins(t *testing.T) {
+	handler := cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	allowed := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodOptions, "/api/contexts", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	handler.ServeHTTP(allowed, req)
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("allowed preflight status = %d", allowed.Code)
+	}
+	if got := allowed.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("allowed origin header = %q", got)
+	}
+
+	blocked := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodOptions, "/api/contexts", nil)
+	req.Header.Set("Origin", "https://example.com")
+	handler.ServeHTTP(blocked, req)
+	if blocked.Code != http.StatusForbidden {
+		t.Fatalf("blocked preflight status = %d", blocked.Code)
+	}
+	if got := blocked.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("blocked origin header = %q", got)
+	}
+
+	blockedGet := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/contexts", nil)
+	req.Header.Set("Origin", "https://example.com")
+	handler.ServeHTTP(blockedGet, req)
+	if blockedGet.Code != http.StatusForbidden {
+		t.Fatalf("blocked GET status = %d", blockedGet.Code)
 	}
 }

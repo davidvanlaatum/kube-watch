@@ -9,12 +9,12 @@ Overview
 
 Install
 - Prefer the pre-built binaries from GitHub Releases: https://github.com/davidvanlaatum/kube-watch/releases
-- Download the archive for your OS/architecture, extract `kube-watch`, and run it from your terminal. After installing, use `kube-watch selfupdate` to update in place.
+- Download the archive for your OS/architecture, extract `kube-watch`, and run it from your terminal. After installing on macOS/Linux, use `kube-watch selfupdate` to update in place. On Windows, update by downloading the latest archive and replacing `kube-watch.exe` manually.
 
 Quick start (local)
-1. Ensure kubectl and gcloud (if using GKE) are installed and kubeconfig has contexts that can authenticate (gke-gcloud-auth-plugin supported by client-go exec plugin). Kubeconfig loading follows client-go/kubectl-style defaults, including `$KUBECONFIG` with multiple files and fallback to `~/.kube/config`.
+1. Ensure kubectl and gcloud (if using GKE) are installed and kubeconfig has contexts that can authenticate. GKE contexts that use `gke-gcloud-auth-plugin` require the plugin to be installed and valid `gcloud` credentials. Kubeconfig loading follows client-go/kubectl-style defaults, including `$KUBECONFIG` with multiple files and fallback to `~/.kube/config`.
 
-2. Start Go backend (it will generate self-signed certs in ./certs):
+2. Start Go backend (it listens on 127.0.0.1:9443 and will generate self-signed certs in ./certs):
    go mod tidy
    go run .
 
@@ -23,7 +23,7 @@ Quick start (local)
    npm install
    npm run dev
 
-4. Open http://localhost:5173. Vite will proxy API and SSE to the Go backend at https://localhost:9443.
+4. Open http://localhost:5173. Vite will proxy API and SSE to the Go backend at https://127.0.0.1:9443.
 
 Production build:
    cd web
@@ -52,11 +52,11 @@ Review process:
 - Small documentation-only changes may use a lighter review, but runtime, release, auth, watch, log, or self-update changes should cover all lenses.
 
 Release build:
-- Pushing a tag that matches `vX.X.X` runs GitHub Actions with GoReleaser.
+- Pushing a tag that matches `vX.X.X` runs GitHub Actions validation and then GoReleaser.
 - GoReleaser runs `npm ci --prefix web` and `npm run build --prefix web` before compiling so released binaries embed the production UI from `web/dist`.
 - GoReleaser injects version, commit, and build date into the binary. The UI reads `/api/version` and links to the latest GitHub Release when a newer version is available.
 - Release artifacts are built for Linux, macOS, and Windows on amd64 and arm64, with checksums uploaded to the GitHub Release.
-- To update an installed binary in place, run `kube-watch selfupdate`. It downloads the latest compatible GitHub Release asset, verifies it against `checksums.txt`, and replaces the current executable. Use `kube-watch selfupdate --force` to reinstall the latest release even when the current version is not older.
+- To update an installed binary in place on macOS/Linux, run `kube-watch selfupdate`. It downloads the latest compatible GitHub Release asset, verifies it against `checksums.txt`, and replaces the current executable. Use `kube-watch selfupdate --force` to reinstall the latest release even when the current version is not older. On Windows, download the latest archive and replace `kube-watch.exe` manually.
 
 Notes & next steps
 - Current implementation is a prototype: watches use dynamic client and basic list-then-watch logic with in-memory resume.
@@ -67,7 +67,7 @@ Notes & next steps
 Troubleshooting & operational notes
 - Logs: run the backend interactively with `go run .` to see structured slog output on stdout (recommended). Watch/subscription open/close, forbidden access, and reconnect conditions are logged with cluster, namespace, and resource fields.
 
-- gke / gcloud auth: contexts that use `gke-gcloud-auth-plugin` require `gcloud` credentials accessible to the Go process. Run `gcloud auth login` (interactive) before starting the backend so the exec plugin can obtain tokens.
+- gke / gcloud auth: contexts that use `gke-gcloud-auth-plugin` require the plugin and `gcloud` credentials accessible to the Go process. Install the plugin with `gcloud components install gke-gcloud-auth-plugin` when needed, then run `gcloud auth login` before starting the backend so the exec plugin can obtain tokens.
 
 - kubeconfig loading: the backend uses client-go default loading rules, so it honors `$KUBECONFIG` including multiple files separated by the OS path-list separator (`:` on macOS/Linux) and falls back to `~/.kube/config`.
 
@@ -77,7 +77,7 @@ Troubleshooting & operational notes
 
 - Log streaming: `/logs/{context}/{resource}/{namespace}/{name}?tailLines=200` streams Server-Sent Events for pod/deployment logs. The UI lets you change `tailLines` up to 5000 and keeps following live output.
 
-- Self-update: `kube-watch selfupdate` checks `https://github.com/davidvanlaatum/kube-watch/releases/latest`, selects the archive matching the current OS/architecture, verifies the SHA-256 checksum from the release, and swaps the running executable path. If installed in a protected directory, rerun with the permissions required to replace that file.
+- Self-update: on macOS/Linux, `kube-watch selfupdate` checks `https://github.com/davidvanlaatum/kube-watch/releases/latest`, selects the archive matching the current OS/architecture, verifies the SHA-256 checksum from the release, and swaps the running executable path. If installed in a protected directory, rerun with the permissions required to replace that file. Windows self-update is not supported; replace `kube-watch.exe` manually from the latest release archive.
 
 Agent / operator instructions
 - Start backend interactively:

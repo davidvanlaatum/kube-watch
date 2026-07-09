@@ -211,6 +211,35 @@ describe('App', () => {
     expect(screen.getByRole('row', { name: /worker-55f8/ })).toBeInTheDocument()
   })
 
+  it('applies modified and deleted resource events', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect] = await screen.findAllByRole('combobox')
+    await user.selectOptions(contextSelect, 'dev')
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    MockEventSource.instances[0].emit(podEvent('pod-1', 'api-7d9f'))
+    MockEventSource.instances[0].emit({ type: 'SYNCED' })
+    const row = await screen.findByRole('row', { name: /api-7d9f/ })
+    await user.click(row)
+    expect(await screen.findByText('api-7d9f')).toBeInTheDocument()
+
+    const modified = podEvent('pod-1', 'api-7d9f', { phase: 'Pending', ready: false })
+    modified.type = 'MODIFIED'
+    MockEventSource.instances[0].emit(modified)
+    expect(await screen.findByRole('row', { name: /Pending/ })).toBeInTheDocument()
+
+    const deleted = podEvent('pod-1', 'api-7d9f')
+    deleted.type = 'DELETED'
+    MockEventSource.instances[0].emit(deleted)
+
+    await waitFor(() => {
+      expect(screen.queryByRole('row', { name: /api-7d9f/ })).not.toBeInTheDocument()
+    })
+    expect(screen.queryByRole('button', { name: 'YAML' })).not.toBeInTheDocument()
+  })
+
   it('hides status filter for resources without status semantics', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(<App />)
@@ -321,6 +350,14 @@ describe('App', () => {
       type: 'LOG',
       pod: 'api-7d9f',
       container: 'app',
+      timestamp: '2026-07-08T00:00:02Z',
+      line: 'second',
+      seq: 2,
+    })
+    logsStream?.emit({
+      type: 'LOG',
+      pod: 'api-7d9f',
+      container: 'app',
       timestamp: '2026-07-08T00:00:01Z',
       line: 'first',
       seq: 0,
@@ -338,6 +375,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(logOutput.textContent).toMatch(/api-7d9f: first[\s\S]*api-7d9f: second/)
     })
+    expect(logOutput.textContent?.match(/api-7d9f: second/g)).toHaveLength(2)
     expect(within(logOutput).getAllByText('api-7d9f:')[0]).toHaveClass('log-pod')
     expect(logOutput).not.toHaveTextContent('sidecar line')
 

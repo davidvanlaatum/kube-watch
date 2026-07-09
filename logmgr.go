@@ -13,6 +13,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -110,7 +111,7 @@ func (m *LogManager) streamDeployment(ctx context.Context, client kubernetes.Int
 		return
 	}
 
-	streams := &podLogStreams{cancels: make(map[string]context.CancelFunc)}
+	streams := &podLogStreams{cancels: make(map[string]podLogCancel)}
 	defer streams.stopAll()
 
 	announced := false
@@ -169,6 +170,21 @@ func (m *LogManager) streamDeployment(ctx context.Context, client kubernetes.Int
 					relist = true
 					break
 				}
+				if string(event.Type) == "ERROR" {
+					if status, ok := watchErrorStatus(event.Object); ok {
+						if status.Code == 410 || status.Reason == metav1.StatusReasonExpired {
+							slog.Warn("deployment pod watch resourceVersion expired for logs", "namespace", namespace, "deployment", deploymentName, "message", status.Message)
+							sendLogInfo(ctx, out, "deployment pod watch expired; re-listing pods")
+							watcher.Stop()
+							relist = true
+							break
+						}
+						sendLogError(ctx, out, "deployment pod watch error: "+status.Message)
+						continue
+					}
+					runtime.HandleError(fmt.Errorf("unexpected deployment pod watch error object %T", event.Object))
+					continue
+				}
 				pod, ok := event.Object.(*corev1.Pod)
 				if !ok {
 					runtime.HandleError(fmt.Errorf("unexpected deployment pod watch object %T", event.Object))
@@ -194,7 +210,14 @@ func (m *LogManager) streamDeployment(ctx context.Context, client kubernetes.Int
 
 type podLogStreams struct {
 	mu      sync.Mutex
-	cancels map[string]context.CancelFunc
+	wg      sync.WaitGroup
+	nextID  uint64
+	cancels map[string]podLogCancel
+}
+
+type podLogCancel struct {
+	id     uint64
+	cancel context.CancelFunc
 }
 
 func (s *podLogStreams) start(parent context.Context, client kubernetes.Interface, pod *corev1.Pod, tailLines int64, out chan<- []byte) {
@@ -207,40 +230,50 @@ func (s *podLogStreams) start(parent context.Context, client kubernetes.Interfac
 		return
 	}
 	ctx, cancel := context.WithCancel(parent)
-	s.cancels[pod.Name] = cancel
+	s.nextID++
+	id := s.nextID
+	s.cancels[pod.Name] = podLogCancel{id: id, cancel: cancel}
+	s.wg.Add(1)
 	s.mu.Unlock()
 
 	go func() {
-		defer func() {
-			s.mu.Lock()
-			delete(s.cancels, pod.Name)
-			s.mu.Unlock()
-		}()
+		defer s.wg.Done()
+		defer s.finish(pod.Name, id)
 		streamPodLogs(ctx, client, pod, tailLines, out)
 	}()
 }
 
+func (s *podLogStreams) finish(podName string, id uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if current, ok := s.cancels[podName]; ok && current.id == id {
+		delete(s.cancels, podName)
+	}
+}
+
 func (s *podLogStreams) stop(podName string) {
 	s.mu.Lock()
-	cancel := s.cancels[podName]
+	entry := s.cancels[podName]
 	delete(s.cancels, podName)
 	s.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	if entry.cancel != nil {
+		entry.cancel()
 	}
 }
 
 func (s *podLogStreams) stopAll() {
 	s.mu.Lock()
 	cancels := make([]context.CancelFunc, 0, len(s.cancels))
-	for podName, cancel := range s.cancels {
-		cancels = append(cancels, cancel)
+	for podName, entry := range s.cancels {
+		cancels = append(cancels, entry.cancel)
 		delete(s.cancels, podName)
 	}
 	s.mu.Unlock()
 	for _, cancel := range cancels {
 		cancel()
 	}
+	s.wg.Wait()
 }
 
 func (s *podLogStreams) stopMissing(current map[string]struct{}) {
@@ -286,7 +319,7 @@ func streamPodLogs(ctx context.Context, client kubernetes.Interface, pod *corev1
 	sendLogInfo(ctx, out, fmt.Sprintf("following logs for pod %s", pod.Name))
 
 	var wg sync.WaitGroup
-	for _, container := range containers {
+	for _, container := range podFollowContainerNames(pod) {
 		wg.Add(1)
 		go func(container string) {
 			defer wg.Done()
@@ -312,44 +345,90 @@ func readContainerLogs(ctx context.Context, client kubernetes.Interface, namespa
 }
 
 func followContainerLogs(ctx context.Context, client kubernetes.Interface, namespace, podName, container string, since time.Time, out chan<- []byte) {
-	sinceTime := metav1.NewTime(since)
-	zeroTail := int64(0)
-	opts := &corev1.PodLogOptions{
-		Container:  container,
-		Follow:     true,
-		TailLines:  &zeroTail,
-		SinceTime:  &sinceTime,
-		Timestamps: true,
-	}
-	req := client.CoreV1().Pods(namespace).GetLogs(podName, opts)
-	stream, err := req.Stream(ctx)
-	if err != nil {
-		if ctx.Err() == nil {
-			slog.Warn("failed to follow container logs", "namespace", namespace, "pod", podName, "container", container, "error", err)
-			sendLogError(ctx, out, fmt.Sprintf("%s/%s follow logs failed: %v", podName, container, err))
+	nextSince := since
+	for ctx.Err() == nil {
+		sinceTime := metav1.NewTime(nextSince)
+		zeroTail := int64(0)
+		opts := &corev1.PodLogOptions{
+			Container:  container,
+			Follow:     true,
+			TailLines:  &zeroTail,
+			SinceTime:  &sinceTime,
+			Timestamps: true,
 		}
-		return
-	}
-	defer stream.Close()
+		req := client.CoreV1().Pods(namespace).GetLogs(podName, opts)
+		stream, err := req.Stream(ctx)
+		if err != nil {
+			if ctx.Err() == nil {
+				slog.Warn("failed to follow container logs", "namespace", namespace, "pod", podName, "container", container, "error", err)
+				sendLogError(ctx, out, fmt.Sprintf("%s/%s follow logs failed: %v", podName, container, err))
+				if apierrors.IsNotFound(err) {
+					return
+				}
+				if !sleepOrDone(ctx, time.Second) {
+					return
+				}
+			}
+			continue
+		}
 
-	scanner := bufio.NewScanner(stream)
-	for scanner.Scan() {
-		line := parseLogLine(podName, container, scanner.Text())
-		sendLogLine(ctx, out, line)
-	}
-	if err := scanner.Err(); err != nil && ctx.Err() == nil {
-		slog.Warn("container log stream ended with scanner error", "namespace", namespace, "pod", podName, "container", container, "error", err)
-		sendLogError(ctx, out, fmt.Sprintf("%s/%s log stream error: %v", podName, container, err))
+		lastSeen, err := scanFollowLogStream(ctx, stream, podName, container, out)
+		if closeErr := stream.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+		if !lastSeen.IsZero() {
+			nextSince = lastSeen.Add(time.Nanosecond)
+		}
+		if err != nil && ctx.Err() == nil {
+			slog.Warn("container log stream ended with scanner error", "namespace", namespace, "pod", podName, "container", container, "error", err)
+			sendLogError(ctx, out, fmt.Sprintf("%s/%s log stream error: %v", podName, container, err))
+		}
+		if !sleepOrDone(ctx, time.Second) {
+			return
+		}
 	}
 }
 
+func watchErrorStatus(obj interface{}) (metav1.Status, bool) {
+	switch status := obj.(type) {
+	case *metav1.Status:
+		return *status, true
+	case apierrors.APIStatus:
+		return status.Status(), true
+	default:
+		return metav1.Status{}, false
+	}
+}
+
+func scanFollowLogStream(ctx context.Context, stream io.Reader, podName, container string, out chan<- []byte) (time.Time, error) {
+	scanner := newLogScanner(stream)
+	lastSeen := time.Time{}
+	seq := int64(0)
+	for scanner.Scan() {
+		line := parseLogLine(podName, container, scanner.Text())
+		line.Seq = seq
+		seq++
+		if !line.Timestamp.IsZero() {
+			lastSeen = line.Timestamp
+		}
+		sendLogLine(ctx, out, line)
+	}
+	return lastSeen, scanner.Err()
+}
+
 func scanLogLines(reader io.Reader, podName, container string) ([]logLine, error) {
-	scanner := bufio.NewScanner(reader)
+	scanner := newLogScanner(reader)
 	lines := make([]logLine, 0)
 	for scanner.Scan() {
 		lines = append(lines, parseLogLine(podName, container, scanner.Text()))
 	}
 	return lines, scanner.Err()
+}
+
+func newLogScanner(reader io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	return scanner
 }
 
 func parseLogLine(podName, container, raw string) logLine {
@@ -399,6 +478,31 @@ func podContainerNames(pod *corev1.Pod) []string {
 	}
 	for _, container := range pod.Spec.InitContainers {
 		add(container.Name)
+	}
+	for _, container := range pod.Spec.Containers {
+		add(container.Name)
+	}
+	for _, container := range pod.Spec.EphemeralContainers {
+		add(container.Name)
+	}
+	return names
+}
+
+func podFollowContainerNames(pod *corev1.Pod) []string {
+	if pod == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	names := make([]string, 0, len(pod.Spec.Containers)+len(pod.Spec.EphemeralContainers))
+	add := func(name string) {
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
 	}
 	for _, container := range pod.Spec.Containers {
 		add(container.Name)

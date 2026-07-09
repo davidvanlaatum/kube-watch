@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -84,6 +85,10 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	if err := ensureTLSFilePermissions(keyPath); err != nil {
+		slog.Error("failed to secure TLS key permissions", "path", keyPath, "error", err)
+		os.Exit(1)
+	}
 
 	// instantiate watch manager
 	wm := NewWatchManager(loadingRules)
@@ -124,13 +129,21 @@ func main() {
 
 	mux.HandleFunc("/sse/", func(w http.ResponseWriter, r *http.Request) {
 		// URL format: /sse/{context}/{resource}
-		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/sse/"), "/")
+		parts := escapedPathSegments(r, "/sse/")
 		if len(parts) < 2 {
 			http.Error(w, "expected /sse/{context}/{resource}", http.StatusBadRequest)
 			return
 		}
-		ctxName := parts[0]
-		resource := parts[1]
+		ctxName, err := urlPathValue(parts[0])
+		if err != nil {
+			http.Error(w, "invalid context", http.StatusBadRequest)
+			return
+		}
+		resource, err := urlPathSegment(parts[1])
+		if err != nil {
+			http.Error(w, "invalid resource", http.StatusBadRequest)
+			return
+		}
 		if _, ok := supportedResources[resource]; !ok {
 			http.Error(w, "unsupported resource", http.StatusBadRequest)
 			return
@@ -158,10 +171,9 @@ func main() {
 		fmt.Fprintf(w, "data: %s\n\n", []byte("{\"info\":\"connected\"}"))
 		flusher.Flush()
 
-		notify := w.(http.CloseNotifier).CloseNotify()
 		for {
 			select {
-			case <-notify:
+			case <-r.Context().Done():
 				return
 			case b, ok := <-ch:
 				if !ok {
@@ -175,12 +187,12 @@ func main() {
 
 	mux.HandleFunc("/logs/", func(w http.ResponseWriter, r *http.Request) {
 		// URL format: /logs/{context}/{resource}/{namespace}/{name}
-		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/logs/"), "/")
+		parts := escapedPathSegments(r, "/logs/")
 		if len(parts) < 4 {
 			http.Error(w, "expected /logs/{context}/{resource}/{namespace}/{name}", http.StatusBadRequest)
 			return
 		}
-		ctxName, err := urlPathSegment(parts[0])
+		ctxName, err := urlPathValue(parts[0])
 		if err != nil {
 			http.Error(w, "invalid context", http.StatusBadRequest)
 			return
@@ -223,10 +235,9 @@ func main() {
 		fmt.Fprintf(w, "data: %s\n\n", []byte("{\"info\":\"connected\"}"))
 		flusher.Flush()
 
-		notify := w.(http.CloseNotifier).CloseNotify()
 		for {
 			select {
-			case <-notify:
+			case <-r.Context().Done():
 				return
 			case b, ok := <-ch:
 				if !ok {
@@ -239,14 +250,18 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:    ":9443",
+		Addr:    "127.0.0.1:9443",
 		Handler: cors(mux),
 	}
 
-	cert, _ := tls.LoadX509KeyPair(certPath, keyPath)
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		slog.Error("failed to load TLS certificate", "cert", certPath, "key", keyPath, "error", err)
+		os.Exit(1)
+	}
 	srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
 
-	slog.Info("server listening", "addr", "https://localhost:9443", "endpoints", "/api/contexts,/api/version,/sse/{context}/{resource},/logs/{context}/{resource}/{namespace}/{name}")
+	slog.Info("server listening", "addr", "https://127.0.0.1:9443", "endpoints", "/api/contexts,/api/version,/sse/{context}/{resource},/logs/{context}/{resource}/{namespace}/{name}")
 	if err := srv.ListenAndServeTLS("", ""); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
@@ -295,14 +310,30 @@ func contextSummaries(contexts []map[string]string) []string {
 }
 
 func urlPathSegment(segment string) (string, error) {
+	value, err := urlPathValue(segment)
+	if err != nil {
+		return "", err
+	}
+	if strings.Contains(value, "/") {
+		return "", fmt.Errorf("invalid path segment")
+	}
+	return value, nil
+}
+
+func urlPathValue(segment string) (string, error) {
 	value, err := url.PathUnescape(segment)
 	if err != nil {
 		return "", err
 	}
-	if value == "" || strings.Contains(value, "/") {
+	if value == "" {
 		return "", fmt.Errorf("invalid path segment")
 	}
 	return value, nil
+}
+
+func escapedPathSegments(r *http.Request, prefix string) []string {
+	path := strings.TrimPrefix(r.URL.EscapedPath(), prefix)
+	return strings.Split(path, "/")
 }
 
 func parseTailLines(value string) int64 {
@@ -321,6 +352,13 @@ func parseTailLines(value string) int64 {
 
 // generate a minimal self-signed cert for localhost
 func generateSelfSignedCert(certPath, keyPath string) error {
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(certPath), 0755); err != nil {
+		return err
+	}
+
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return err
@@ -336,6 +374,7 @@ func generateSelfSignedCert(certPath, keyPath string) error {
 		NotBefore:   now.Add(-time.Hour),
 		NotAfter:    now.AddDate(1, 0, 0),
 		DNSNames:    []string{"localhost"},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
 		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
@@ -345,26 +384,48 @@ func generateSelfSignedCert(certPath, keyPath string) error {
 		return err
 	}
 
-	certOut, err := os.Create(certPath)
+	certOut, err := os.OpenFile(certPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
 	}
-	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: der})
-	certOut.Close()
+	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
+		certOut.Close()
+		return err
+	}
+	if err := certOut.Close(); err != nil {
+		return err
+	}
 
-	keyOut, err := os.Create(keyPath)
+	keyOut, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
-	pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
-	keyOut.Close()
-	return nil
+	if err := pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}); err != nil {
+		keyOut.Close()
+		return err
+	}
+	return keyOut.Close()
+}
+
+func ensureTLSFilePermissions(keyPath string) error {
+	if _, err := os.Stat(keyPath); err != nil {
+		return err
+	}
+	return os.Chmod(keyPath, 0600)
 }
 
 // CORS helper
 func cors(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if origin := r.Header.Get("Origin"); origin != "" {
+			if !allowedCORSOrigin(origin) {
+				http.Error(w, "origin not allowed", http.StatusForbidden)
+				return
+			} else {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+			}
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == "OPTIONS" {
@@ -373,4 +434,16 @@ func cors(h http.Handler) http.Handler {
 		}
 		h.ServeHTTP(w, r)
 	})
+}
+
+func allowedCORSOrigin(origin string) bool {
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return false
+	}
+	host := parsed.Hostname()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }

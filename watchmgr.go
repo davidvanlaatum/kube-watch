@@ -135,7 +135,7 @@ func (m *WatchManager) newEntry(cluster string, gvr schema.GroupVersionResource)
 }
 
 func (e *watchEntry) subscribe(sendSnapshot bool) (chan []byte, func(), chan struct{}, bool) {
-	ch := make(chan []byte, 256)
+	ch := make(chan []byte, e.subscriptionBuffer(sendSnapshot))
 	done := make(chan struct{})
 	var once sync.Once
 
@@ -154,6 +154,16 @@ func (e *watchEntry) subscribe(sendSnapshot bool) (chan []byte, func(), chan str
 	}
 
 	return ch, unsubscribe, stopCh, shouldStart
+}
+
+func (e *watchEntry) subscriptionBuffer(includeSnapshot bool) int {
+	if !includeSnapshot {
+		return 256
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return len(e.cache) + 256
 }
 
 func (e *watchEntry) addClient(ch chan []byte, includeSnapshot bool) ([][]byte, []byte, int, chan struct{}, bool) {
@@ -204,7 +214,6 @@ func sendInitialSnapshot(ch chan []byte, done <-chan struct{}, cacheSnapshot [][
 		case <-done:
 			return
 		case ch <- v:
-		default:
 		}
 	}
 	if terminalError != nil {
@@ -212,7 +221,6 @@ func sendInitialSnapshot(ch chan []byte, done <-chan struct{}, cacheSnapshot [][
 		case <-done:
 			return
 		case ch <- terminalError:
-		default:
 		}
 		return
 	}
@@ -220,7 +228,6 @@ func sendInitialSnapshot(ch chan []byte, done <-chan struct{}, cacheSnapshot [][
 	case <-done:
 		return
 	case ch <- syncedEvent:
-	default:
 	}
 }
 
@@ -253,11 +260,14 @@ func (e *watchEntry) stopLocked() {
 		slog.Info("stopping cluster watch entry", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource)
 		close(e.stopCh)
 	}
-	e.running = false
 }
 
 func (e *watchEntry) run(stopCh chan struct{}) {
-	defer e.markRunStopped(stopCh)
+	defer func() {
+		if restartStopCh, restart := e.markRunStopped(stopCh); restart {
+			go e.run(restartStopCh)
+		}
+	}()
 	res := e.dyn.Resource(e.gvr)
 	ns := e.namespace
 	if ns == "" {
@@ -265,14 +275,24 @@ func (e *watchEntry) run(stopCh chan struct{}) {
 	}
 	for {
 		// initial list to prime state and set resourceVersion if available (namespaced)
-		ulist, err := res.Namespace(ns).List(context.Background(), metav1.ListOptions{})
+		listCtx, listCancel := contextForStop(stopCh)
+		ulist, err := res.Namespace(ns).List(listCtx, metav1.ListOptions{})
+		listCancel()
 		if err == nil {
+			e.clearTerminalError()
 			if rv := ulist.GetResourceVersion(); rv != "" {
 				e.lastRV = rv
 			}
+			currentKeys := make(map[string]struct{}, len(ulist.Items))
 			for _, item := range ulist.Items {
 				b, _ := json.Marshal(map[string]interface{}{"type": "ADDED", "object": item.Object})
 				e.broadcast(b)
+				if key := unstructuredCacheKey(&item); key != "" {
+					currentKeys[key] = struct{}{}
+				}
+			}
+			for _, deleted := range e.deleteMissingCached(currentKeys) {
+				e.broadcast(deleted)
 			}
 			e.broadcast(syncedEvent)
 		} else {
@@ -293,20 +313,20 @@ func (e *watchEntry) run(stopCh chan struct{}) {
 			continue
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
 		opts := metav1.ListOptions{Watch: true}
 		if e.lastRV != "" {
 			opts.ResourceVersion = e.lastRV
 		}
-		watcher, err := res.Namespace(ns).Watch(ctx, opts)
+		watchCtx, watchCancel := contextForStop(stopCh)
+		watcher, err := res.Namespace(ns).Watch(watchCtx, opts)
 		if err != nil {
+			watchCancel()
 			// log and broadcast error to clients with details
 			if errors.IsForbidden(err) {
 				slog.Error("namespaced watch start forbidden", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "resourceVersion", opts.ResourceVersion, "error", err)
 				msg := errorEvent("namespaced watch forbidden", err)
 				e.setTerminalError(msg)
 				e.broadcast(msg)
-				cancel()
 				slog.Info("cluster watch closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "reason", "forbidden")
 				return
 			} else {
@@ -327,7 +347,6 @@ func (e *watchEntry) run(stopCh chan struct{}) {
 					e.broadcast(errorEvent("namespaced watch failed", err))
 				}
 			}
-			cancel()
 			// backoff
 			select {
 			case <-time.After(3 * time.Second):
@@ -345,22 +364,21 @@ func (e *watchEntry) run(stopCh chan struct{}) {
 			case <-stopCh:
 				running = false
 				watcher.Stop()
-				cancel()
+				watchCancel()
 				slog.Info("cluster watch closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "reason", "stop requested")
 				return
 			case ev, ok := <-ch:
 				if !ok {
 					running = false
 					watcher.Stop()
-					cancel()
+					watchCancel()
 					slog.Warn("cluster watch channel closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource)
 					// will loop and recreate watch
 					break
 				}
 				// handle error events that may indicate resourceVersion expiry (410)
 				if string(ev.Type) == "ERROR" {
-					if se, ok := ev.Object.(errors.APIStatus); ok {
-						st := se.Status()
+					if st, ok := watchErrorStatus(ev.Object); ok {
 						if st.Code == 410 || st.Reason == metav1.StatusReasonExpired {
 							slog.Warn("received watch resourceVersion expired", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "message", st.Message)
 							e.broadcast(errorMessage("watch resourceVersion expired: " + st.Message + "; re-listing"))
@@ -370,7 +388,7 @@ func (e *watchEntry) run(stopCh chan struct{}) {
 							running = false
 							w := watcher
 							w.Stop()
-							cancel()
+							watchCancel()
 							slog.Info("cluster watch closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "reason", "resourceVersion expired")
 							break
 						}
@@ -395,6 +413,7 @@ func (e *watchEntry) run(stopCh chan struct{}) {
 				e.broadcast(b)
 			}
 		}
+		watchCancel()
 		// small pause before re-establishing
 		select {
 		case <-time.After(1 * time.Second):
@@ -404,119 +423,29 @@ func (e *watchEntry) run(stopCh chan struct{}) {
 	}
 }
 
-func (e *watchEntry) markRunStopped(stopCh chan struct{}) {
+func (e *watchEntry) markRunStopped(stopCh chan struct{}) (chan struct{}, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if e.stopCh == stopCh {
-		e.running = false
+	if e.stopCh != stopCh {
+		return nil, false
 	}
+	e.running = false
+	if len(e.clients) == 0 || !isClosed(stopCh) {
+		return nil, false
+	}
+	e.stopCh = make(chan struct{})
+	e.running = true
+	return e.stopCh, true
 }
 
-// runNamespaced runs a single namespace list+watch (blocking until stop)
-func (e *watchEntry) runNamespaced(ns string) error {
-	res := e.dyn.Resource(e.gvr)
-	for {
-		ulist, err := res.Namespace(ns).List(context.Background(), metav1.ListOptions{})
-		if err == nil {
-			for _, item := range ulist.Items {
-				b, _ := json.Marshal(map[string]interface{}{"type": "ADDED", "object": item.Object})
-				e.broadcast(b)
-			}
-			e.broadcast(syncedEvent)
-		} else {
-			slog.Error("namespaced list failed", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource, "error", err)
-			e.broadcast(errorEvent(fmt.Sprintf("namespaced list %s failed", ns), err))
-			// if this namespace is forbidden, return error so caller can try others
-			return err
-		}
-
-		ctx, cancel := context.WithCancel(context.Background())
-		opts := metav1.ListOptions{Watch: true}
-		watcher, err := res.Namespace(ns).Watch(ctx, opts)
-		if err != nil {
-			slog.Error("namespaced watch failed", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource, "error", err)
-			e.broadcast(errorEvent(fmt.Sprintf("namespaced watch %s failed", ns), err))
-			cancel()
-			select {
-			case <-time.After(3 * time.Second):
-			case <-e.stopCh:
-				return nil
-			}
-			continue
-		}
-		slog.Info("cluster watch opened", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource)
-
-		ch := watcher.ResultChan()
-		for {
-			select {
-			case <-e.stopCh:
-				watcher.Stop()
-				cancel()
-				slog.Info("cluster watch closed", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource, "reason", "stop requested")
-				return nil
-			case ev, ok := <-ch:
-				if !ok {
-					watcher.Stop()
-					cancel()
-					slog.Warn("cluster watch channel closed", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource)
-					break
-				}
-				// handle ERROR events signaling resourceVersion expiry
-				if string(ev.Type) == "ERROR" {
-					if se, ok := ev.Object.(errors.APIStatus); ok {
-						st := se.Status()
-						if st.Code == 410 || st.Reason == metav1.StatusReasonExpired {
-							slog.Warn("received watch resourceVersion expired", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource, "message", st.Message)
-							e.broadcast(errorMessage(fmt.Sprintf("watch resourceVersion expired for %s: %s; re-listing", ns, st.Message)))
-							e.lastRV = ""
-							w := watcher
-							w.Stop()
-							cancel()
-							break
-						}
-					}
-					b, _ := json.Marshal(map[string]interface{}{"type": ev.Type, "object": ev.Object})
-					e.broadcast(b)
-					continue
-				}
-				if uo, ok := ev.Object.(*unstructured.Unstructured); ok {
-					if rv := uo.GetResourceVersion(); rv != "" {
-						e.lastRV = rv
-					}
-				}
-				b, _ := json.Marshal(map[string]interface{}{"type": ev.Type, "object": ev.Object})
-				e.broadcast(b)
-			}
-		}
-		select {
-		case <-time.After(1 * time.Second):
-		case <-e.stopCh:
-			return nil
-		}
+func isClosed(ch chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
 	}
-}
-
-// runNamespacedMultiple runs watches for multiple namespaces concurrently
-func (e *watchEntry) runNamespacedMultiple(names []string) error {
-	// limit to first 10
-	if len(names) > 10 {
-		names = names[:10]
-	}
-	slog.Info("starting namespaced watchers", "cluster", e.cluster, "resource", e.gvr.Resource, "namespaces", names)
-	var wg sync.WaitGroup
-	for _, ns := range names {
-		wg.Add(1)
-		ns := ns
-		go func() {
-			defer wg.Done()
-			_ = e.runNamespaced(ns)
-		}()
-	}
-	// wait until stop requested
-	<-e.stopCh
-	wg.Wait()
-	return nil
 }
 
 func (e *watchEntry) setTerminalError(msg []byte) {
@@ -524,6 +453,13 @@ func (e *watchEntry) setTerminalError(msg []byte) {
 	defer e.mu.Unlock()
 
 	e.terminalError = msg
+}
+
+func (e *watchEntry) clearTerminalError() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.terminalError = nil
 }
 
 func errorEvent(prefix string, err error) []byte {
@@ -593,4 +529,62 @@ func (e *watchEntry) deleteCached(uid string) {
 	defer e.mu.Unlock()
 
 	delete(e.cache, uid)
+}
+
+func (e *watchEntry) deleteMissingCached(currentKeys map[string]struct{}) [][]byte {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	deleted := make([][]byte, 0)
+	for key, msg := range e.cache {
+		if _, ok := currentKeys[key]; ok {
+			continue
+		}
+		delete(e.cache, key)
+		if deleteMsg := deletionEvent(msg); deleteMsg != nil {
+			deleted = append(deleted, deleteMsg)
+		}
+	}
+	return deleted
+}
+
+func deletionEvent(msg []byte) []byte {
+	var envelope struct {
+		Type   string                 `json:"type"`
+		Object map[string]interface{} `json:"object"`
+	}
+	if err := json.Unmarshal(msg, &envelope); err != nil || envelope.Object == nil {
+		return nil
+	}
+	envelope.Type = "DELETED"
+	b, err := json.Marshal(envelope)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func unstructuredCacheKey(obj *unstructured.Unstructured) string {
+	if obj == nil {
+		return ""
+	}
+	if uid := string(obj.GetUID()); uid != "" {
+		return uid
+	}
+	if name := obj.GetName(); name != "" {
+		return name + "/" + obj.GetNamespace()
+	}
+	return ""
+}
+
+func contextForStop(stopCh <-chan struct{}) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel
 }
