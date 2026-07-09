@@ -438,7 +438,9 @@ function metricTargetValue(target?: any) {
 
 function formatDurationSince(timestamp: string | undefined, now = Date.now()) {
   if (!timestamp) return ''
-  return formatMillis(now - new Date(timestamp).getTime())
+  const timestampMillis = new Date(timestamp).getTime()
+  if (!Number.isFinite(timestampMillis)) return ''
+  return formatMillis(Math.max(0, now - timestampMillis))
 }
 
 function formatDurationBetween(start: string, end: string) {

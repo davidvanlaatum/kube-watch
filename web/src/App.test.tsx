@@ -240,6 +240,39 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'YAML' })).not.toBeInTheDocument()
   })
 
+  it('shows last seen immediately for new events ahead of the cached clock tick', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect, resourceSelect] = await screen.findAllByRole('combobox')
+    await user.selectOptions(contextSelect, 'dev')
+    await user.selectOptions(resourceSelect, 'events')
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
+    const eventsStream = MockEventSource.instances.at(-1)!
+
+    eventsStream.emit({
+      type: 'ADDED',
+      object: {
+        kind: 'Event',
+        metadata: {
+          uid: 'event-1',
+          name: 'api-started',
+          namespace: 'default',
+          creationTimestamp: '2026-07-08T00:00:01Z',
+        },
+        eventTime: '2026-07-08T00:00:01Z',
+        type: 'Normal',
+        reason: 'Started',
+        involvedObject: { kind: 'Pod', name: 'api-7d9f' },
+        message: 'Started container api',
+      },
+    })
+    eventsStream.emit({ type: 'SYNCED' })
+
+    const row = await screen.findByRole('row', { name: /Started container api/ })
+    expect(within(row).getByText('0s')).toBeInTheDocument()
+  })
+
   it('hides status filter for resources without status semantics', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(<App />)
