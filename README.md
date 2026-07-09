@@ -32,7 +32,7 @@ Production build:
    go build -o kube-watch .
 
 Tests:
-   go test ./...
+   go test -race ./...
    cd web
    npm ci
    npm run typecheck
@@ -42,7 +42,7 @@ Tests:
 
 CI:
 - GitHub Actions runs on pushes to `main` and pull requests.
-- CI runs Go tests, web type-checking, Vitest unit tests, Playwright Chromium tests, the Vite production build, and the final Go binary build with embedded web assets.
+- CI runs Go tests with the race detector, web type-checking, Vitest unit tests, Playwright Chromium tests, the Vite production build, and the final Go binary build with embedded web assets.
 
 Release build:
 - Pushing a tag that matches `vX.X.X` runs GitHub Actions with GoReleaser.

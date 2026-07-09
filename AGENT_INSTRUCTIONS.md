@@ -34,7 +34,7 @@ Runbook (dev/test)
 - Table filtering is client-side; keep name/status/label filters and resource-specific quick toggles consistent with displayed table semantics.
 - Release builds inject version metadata through GoReleaser ldflags; keep `/api/version` and the UI update notice working when changing release config.
 - `kube-watch selfupdate` downloads GitHub Release assets, verifies `checksums.txt`, and replaces the current executable; keep this flow tested when release asset naming changes.
-- Run checks before committing runtime changes: `go test ./...`, then from `/web` run `npm run typecheck`, `npm run test:unit`, `npm run test:e2e`, and relevant builds.
+- Run checks before committing runtime changes: prefer `go test -race ./...` where possible, then from `/web` run `npm run typecheck`, `npm run test:unit`, `npm run test:e2e`, and relevant builds.
 
 Testing guidance
 - Add Vitest tests for component logic and Playwright tests for user-visible browser behavior.

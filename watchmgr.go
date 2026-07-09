@@ -34,6 +34,7 @@ type watchEntry struct {
 	clients map[chan []byte]struct{}
 	cache   map[string][]byte // uid -> last ADDED/MODIFIED event bytes
 	stopCh  chan struct{}
+	running bool
 	mu      sync.Mutex
 	idle    *time.Timer
 
@@ -50,137 +51,201 @@ func NewWatchManager(loadingRules *clientcmd.ClientConfigLoadingRules) *WatchMan
 }
 
 func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource) (chan []byte, func(), error) {
-	key := cluster + "|" + gvr.Group + "/" + gvr.Version + "/" + gvr.Resource
-	m.mu.Lock()
-	e, ok := m.entries[key]
-	if !ok {
-		// create entry
-		// build a client config loader so we can extract the default namespace for this context
-		over := &clientcmd.ConfigOverrides{CurrentContext: cluster}
-		clientCfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(m.loadingRules, over)
-		cfg, err := clientCfg.ClientConfig()
-		if err != nil {
-			m.mu.Unlock()
-			slog.Error("failed to build cluster config", "cluster", cluster, "resource", gvr.Resource, "error", err)
-			return nil, nil, fmt.Errorf("failed to build config for %s: %w", cluster, err)
-		}
-		dyn, err := dynamic.NewForConfig(cfg)
-		if err != nil {
-			m.mu.Unlock()
-			slog.Error("failed to create cluster client", "cluster", cluster, "resource", gvr.Resource, "error", err)
-			return nil, nil, fmt.Errorf("failed to create dynamic client: %w", err)
-		}
-		ns, _, nerr := clientCfg.Namespace()
-		if nerr != nil || ns == "" {
-			ns = "default"
-		}
-		e = &watchEntry{
-			cluster:   cluster,
-			resource:  gvr.Resource,
-			namespace: ns,
-			gvr:       gvr,
-			dyn:       dyn,
-			clients:   make(map[chan []byte]struct{}),
-			cache:     make(map[string][]byte),
-			stopCh:    make(chan struct{}),
-		}
-		m.entries[key] = e
-		slog.Info("created cluster watch entry", "cluster", cluster, "namespace", ns, "resource", gvr.Resource, "group", gvr.Group, "version", gvr.Version)
-		// add subscriber channel before starting run to avoid race
-		m.mu.Unlock()
-		ch := make(chan []byte, 256)
-		e.mu.Lock()
-		e.clients[ch] = struct{}{}
-		clientCount := len(e.clients)
-		if e.idle != nil {
-			_ = e.idle.Stop()
-			e.idle = nil
-		}
-		e.mu.Unlock()
-		slog.Info("sse subscription opened", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "clients", clientCount)
-		go e.run()
-		// return subscription
-		unsubscribe := func() {
-			e.mu.Lock()
-			delete(e.clients, ch)
-			clientCount := len(e.clients)
-			if len(e.clients) == 0 {
-				e.idle = time.AfterFunc(30*time.Second, func() { e.stop() })
-			}
-			e.mu.Unlock()
-			slog.Info("sse subscription closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "clients", clientCount)
-		}
-		return ch, unsubscribe, nil
-	} else {
-		m.mu.Unlock()
+	e, created, err := m.getOrCreateEntry(cluster, gvr)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	// add subscriber (existing entry)
+	ch, unsubscribe, stopCh, shouldStart := e.subscribe(!created)
+	if shouldStart {
+		go e.run(stopCh)
+	}
+	return ch, unsubscribe, nil
+}
+
+func (m *WatchManager) getOrCreateEntry(cluster string, gvr schema.GroupVersionResource) (*watchEntry, bool, error) {
+	key := watchKey(cluster, gvr)
+	if e, ok := m.lookupEntry(key); ok {
+		return e, false, nil
+	}
+
+	created, err := m.newEntry(cluster, gvr)
+	if err != nil {
+		return nil, false, err
+	}
+
+	created, stored := m.storeEntryIfAbsent(key, created)
+	if stored {
+		slog.Info("created cluster watch entry", "cluster", cluster, "namespace", created.namespace, "resource", gvr.Resource, "group", gvr.Group, "version", gvr.Version)
+	}
+	return created, stored, nil
+}
+
+func (m *WatchManager) lookupEntry(key string) (*watchEntry, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	e, ok := m.entries[key]
+	return e, ok
+}
+
+func (m *WatchManager) storeEntryIfAbsent(key string, entry *watchEntry) (*watchEntry, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if existing, ok := m.entries[key]; ok {
+		return existing, false
+	}
+	m.entries[key] = entry
+	return entry, true
+}
+
+func watchKey(cluster string, gvr schema.GroupVersionResource) string {
+	return cluster + "|" + gvr.Group + "/" + gvr.Version + "/" + gvr.Resource
+}
+
+func (m *WatchManager) newEntry(cluster string, gvr schema.GroupVersionResource) (*watchEntry, error) {
+	over := &clientcmd.ConfigOverrides{CurrentContext: cluster}
+	clientCfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(m.loadingRules, over)
+	cfg, err := clientCfg.ClientConfig()
+	if err != nil {
+		slog.Error("failed to build cluster config", "cluster", cluster, "resource", gvr.Resource, "error", err)
+		return nil, fmt.Errorf("failed to build config for %s: %w", cluster, err)
+	}
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		slog.Error("failed to create cluster client", "cluster", cluster, "resource", gvr.Resource, "error", err)
+		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
+	}
+	ns, _, nerr := clientCfg.Namespace()
+	if nerr != nil || ns == "" {
+		ns = "default"
+	}
+
+	return &watchEntry{
+		cluster:   cluster,
+		resource:  gvr.Resource,
+		namespace: ns,
+		gvr:       gvr,
+		dyn:       dyn,
+		clients:   make(map[chan []byte]struct{}),
+		cache:     make(map[string][]byte),
+		stopCh:    make(chan struct{}),
+	}, nil
+}
+
+func (e *watchEntry) subscribe(sendSnapshot bool) (chan []byte, func(), chan struct{}, bool) {
 	ch := make(chan []byte, 256)
 	done := make(chan struct{})
+	var once sync.Once
+
+	cacheSnapshot, terminalError, clientCount, stopCh, shouldStart := e.addClient(ch, sendSnapshot)
+	slog.Info("sse subscription opened", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "clients", clientCount)
+	if sendSnapshot {
+		go sendInitialSnapshot(ch, done, cacheSnapshot, terminalError)
+	}
+
+	unsubscribe := func() {
+		once.Do(func() {
+			close(done)
+			clientCount := e.removeClient(ch)
+			slog.Info("sse subscription closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "clients", clientCount)
+		})
+	}
+
+	return ch, unsubscribe, stopCh, shouldStart
+}
+
+func (e *watchEntry) addClient(ch chan []byte, includeSnapshot bool) ([][]byte, []byte, int, chan struct{}, bool) {
 	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	e.clients[ch] = struct{}{}
 	clientCount := len(e.clients)
-	// stop idle timer if running
 	if e.idle != nil {
 		_ = e.idle.Stop()
 		e.idle = nil
 	}
-	// send cached snapshot to new subscriber
+	shouldStart := false
+	if !e.running {
+		e.stopCh = make(chan struct{})
+		e.running = true
+		shouldStart = true
+	}
+
+	if !includeSnapshot {
+		return nil, nil, clientCount, e.stopCh, shouldStart
+	}
+
 	cacheSnapshot := make([][]byte, 0, len(e.cache))
 	for _, v := range e.cache {
 		cacheSnapshot = append(cacheSnapshot, v)
 	}
-	terminalError := e.terminalError
-	e.mu.Unlock()
-	slog.Info("sse subscription opened", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "clients", clientCount)
-	go func() {
-		// send cached entries (non-blocking per item)
-		for _, v := range cacheSnapshot {
-			select {
-			case <-done:
-				return
-			case ch <- v:
-			default:
-			}
-		}
-		if terminalError != nil {
-			select {
-			case <-done:
-				return
-			case ch <- terminalError:
-			default:
-			}
-			return
-		}
+	return cacheSnapshot, e.terminalError, clientCount, e.stopCh, shouldStart
+}
+
+func (e *watchEntry) removeClient(ch chan []byte) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	delete(e.clients, ch)
+	clientCount := len(e.clients)
+	if clientCount == 0 {
+		e.idle = time.AfterFunc(30*time.Second, func() {
+			e.stopIfIdle()
+		})
+	}
+	return clientCount
+}
+
+func sendInitialSnapshot(ch chan []byte, done <-chan struct{}, cacheSnapshot [][]byte, terminalError []byte) {
+	for _, v := range cacheSnapshot {
 		select {
 		case <-done:
 			return
-		case ch <- syncedEvent:
+		case ch <- v:
 		default:
 		}
-	}()
-
-	unsubscribe := func() {
-		e.mu.Lock()
-		delete(e.clients, ch)
-		close(done)
-		clientCount := len(e.clients)
-		// if no clients, start idle timer to stop watch
-		if len(e.clients) == 0 {
-			e.idle = time.AfterFunc(30*time.Second, func() {
-				e.stop()
-			})
-		}
-		e.mu.Unlock()
-		slog.Info("sse subscription closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "clients", clientCount)
 	}
-
-	return ch, unsubscribe, nil
+	if terminalError != nil {
+		select {
+		case <-done:
+			return
+		case ch <- terminalError:
+		default:
+		}
+		return
+	}
+	select {
+	case <-done:
+		return
+	case ch <- syncedEvent:
+	default:
+	}
 }
 
 func (e *watchEntry) stop() {
 	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.stopLocked()
+}
+
+func (e *watchEntry) stopIfIdle() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.idle = nil
+	if len(e.clients) > 0 {
+		return
+	}
+	e.stopLocked()
+}
+
+func (e *watchEntry) stopLocked() {
+	if !e.running {
+		return
+	}
 	select {
 	case <-e.stopCh:
 		// already closed
@@ -188,10 +253,11 @@ func (e *watchEntry) stop() {
 		slog.Info("stopping cluster watch entry", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource)
 		close(e.stopCh)
 	}
-	e.mu.Unlock()
+	e.running = false
 }
 
-func (e *watchEntry) run() {
+func (e *watchEntry) run(stopCh chan struct{}) {
+	defer e.markRunStopped(stopCh)
 	res := e.dyn.Resource(e.gvr)
 	ns := e.namespace
 	if ns == "" {
@@ -221,7 +287,7 @@ func (e *watchEntry) run() {
 			e.broadcast(msg)
 			select {
 			case <-time.After(3 * time.Second):
-			case <-e.stopCh:
+			case <-stopCh:
 				return
 			}
 			continue
@@ -265,7 +331,7 @@ func (e *watchEntry) run() {
 			// backoff
 			select {
 			case <-time.After(3 * time.Second):
-			case <-e.stopCh:
+			case <-stopCh:
 				return
 			}
 			continue
@@ -276,7 +342,7 @@ func (e *watchEntry) run() {
 		running := true
 		for running {
 			select {
-			case <-e.stopCh:
+			case <-stopCh:
 				running = false
 				watcher.Stop()
 				cancel()
@@ -332,9 +398,18 @@ func (e *watchEntry) run() {
 		// small pause before re-establishing
 		select {
 		case <-time.After(1 * time.Second):
-		case <-e.stopCh:
+		case <-stopCh:
 			return
 		}
+	}
+}
+
+func (e *watchEntry) markRunStopped(stopCh chan struct{}) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.stopCh == stopCh {
+		e.running = false
 	}
 }
 
@@ -446,8 +521,9 @@ func (e *watchEntry) runNamespacedMultiple(names []string) error {
 
 func (e *watchEntry) setTerminalError(msg []byte) {
 	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	e.terminalError = msg
-	e.mu.Unlock()
 }
 
 func errorEvent(prefix string, err error) []byte {
@@ -484,15 +560,11 @@ func (e *watchEntry) broadcast(msg []byte) {
 		switch envelope.Type {
 		case "DELETED":
 			if uid != "" {
-				e.mu.Lock()
-				delete(e.cache, uid)
-				e.mu.Unlock()
+				e.deleteCached(uid)
 			}
 		case "ADDED", "MODIFIED":
 			if uid != "" {
-				e.mu.Lock()
-				e.cache[uid] = msg
-				e.mu.Unlock()
+				e.setCached(uid, msg)
 			}
 		}
 	}
@@ -507,4 +579,18 @@ func (e *watchEntry) broadcast(msg []byte) {
 			// drop if the client is slow
 		}
 	}
+}
+
+func (e *watchEntry) setCached(uid string, msg []byte) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.cache[uid] = msg
+}
+
+func (e *watchEntry) deleteCached(uid string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	delete(e.cache, uid)
 }

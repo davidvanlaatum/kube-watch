@@ -108,6 +108,7 @@ Contributing / PR checklist
 
 - Run the backend locally and validate the UI connects and receives initial snapshot.
 - Add unit, component, or Playwright tests for non-trivial logic and UI behavior.
+- Prefer `go test -race ./...` for Go validation where possible; CI runs Go tests with the race detector.
 - Keep README.md, PLAN.md, and agent instructions current when behavior, setup, resource support, logging, or troubleshooting changes.
 - Follow the commit trailer convention when committing: include the Copilot Co-authored-by trailer if changes were assisted by the agent.
 

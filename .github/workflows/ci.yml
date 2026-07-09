@@ -34,7 +34,7 @@ jobs:
         working-directory: web
 
       - name: Run Go tests
-        run: go test ./...
+        run: go test -race ./...
 
       - name: Type-check web
         run: npm run typecheck
