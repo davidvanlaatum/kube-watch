@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestBroadcastCachesAddedModifiedAndDeletesByUID(t *testing.T) {
@@ -53,5 +56,38 @@ func TestErrorEventEscapesJSON(t *testing.T) {
 	}
 	if envelope["error"] != `failed: bad "quote"` {
 		t.Fatalf("error = %q", envelope["error"])
+	}
+}
+
+func TestSubscribeUnsubscribeDoesNotCloseSnapshotChannel(t *testing.T) {
+	gvr := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	entry := &watchEntry{
+		cluster:   "dev",
+		namespace: "default",
+		gvr:       gvr,
+		clients:   make(map[chan []byte]struct{}),
+		cache: map[string][]byte{
+			"pod-1": []byte(`{"type":"ADDED","object":{"metadata":{"uid":"pod-1","name":"api","namespace":"default"}}}`),
+		},
+		stopCh: make(chan struct{}),
+	}
+	manager := &WatchManager{
+		entries: map[string]*watchEntry{
+			"dev|/v1/pods": entry,
+		},
+	}
+
+	ch, unsubscribe, err := manager.Subscribe("dev", gvr)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	unsubscribe()
+
+	select {
+	case _, ok := <-ch:
+		if !ok {
+			t.Fatal("unsubscribe closed subscriber channel; snapshot sender can panic when racing with disconnect")
+		}
+	case <-time.After(100 * time.Millisecond):
 	}
 }

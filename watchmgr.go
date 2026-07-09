@@ -103,7 +103,6 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 		unsubscribe := func() {
 			e.mu.Lock()
 			delete(e.clients, ch)
-			close(ch)
 			clientCount := len(e.clients)
 			if len(e.clients) == 0 {
 				e.idle = time.AfterFunc(30*time.Second, func() { e.stop() })
@@ -118,6 +117,7 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 
 	// add subscriber (existing entry)
 	ch := make(chan []byte, 256)
+	done := make(chan struct{})
 	e.mu.Lock()
 	e.clients[ch] = struct{}{}
 	clientCount := len(e.clients)
@@ -138,18 +138,24 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 		// send cached entries (non-blocking per item)
 		for _, v := range cacheSnapshot {
 			select {
+			case <-done:
+				return
 			case ch <- v:
 			default:
 			}
 		}
 		if terminalError != nil {
 			select {
+			case <-done:
+				return
 			case ch <- terminalError:
 			default:
 			}
 			return
 		}
 		select {
+		case <-done:
+			return
 		case ch <- syncedEvent:
 		default:
 		}
@@ -158,7 +164,7 @@ func (m *WatchManager) Subscribe(cluster string, gvr schema.GroupVersionResource
 	unsubscribe := func() {
 		e.mu.Lock()
 		delete(e.clients, ch)
-		close(ch)
+		close(done)
 		clientCount := len(e.clients)
 		// if no clients, start idle timer to stop watch
 		if len(e.clients) == 0 {
