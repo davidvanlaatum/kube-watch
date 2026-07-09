@@ -44,6 +44,13 @@ CI:
 - GitHub Actions runs on pushes to `main` and pull requests.
 - CI runs Go tests with the race detector, web type-checking, Vitest unit tests, Playwright Chromium tests, the Vite production build, and the final Go binary build with embedded web assets.
 
+Review process:
+- For direct agent-assisted changes, run the same review lenses before committing even when no PR is created.
+- Use the pull request template for every non-trivial PR.
+- Required review lenses: Senior Go for concurrency/watch/channel correctness, Senior QA for regression and browser/SSE behavior, Kubernetes/ops for RBAC/kubeconfig/resourceVersion behavior, Security for credentials/self-update/TLS concerns, and Release/docs for GoReleaser/version/install documentation.
+- Actionable in-scope review findings should be fixed before commit, followed by relevant validation and another review pass. Repeat review/fix/validate until no actionable in-scope feedback remains. Any review feedback that is not actioned must be called out with the reason.
+- Small documentation-only changes may use a lighter review, but runtime, release, auth, watch, log, or self-update changes should cover all lenses.
+
 Release build:
 - Pushing a tag that matches `vX.X.X` runs GitHub Actions with GoReleaser.
 - GoReleaser runs `npm ci --prefix web` and `npm run build --prefix web` before compiling so released binaries embed the production UI from `web/dist`.
