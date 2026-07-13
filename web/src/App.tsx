@@ -1,4 +1,42 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react'
+import {
+  Alert,
+  AppBar,
+  Autocomplete,
+  Box,
+  Button,
+  Checkbox,
+  Chip,
+  CircularProgress,
+  CssBaseline,
+  Drawer,
+  FormControl,
+  FormControlLabel,
+  IconButton,
+  InputLabel,
+  Link,
+  MenuItem,
+  Paper,
+  Select,
+  Stack,
+  Tab,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TableSortLabel,
+  Tabs,
+  TextField,
+  ThemeProvider,
+  Tooltip,
+  Toolbar,
+  Typography,
+  createTheme,
+} from '@mui/material'
+import CloseIcon from '@mui/icons-material/Close'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { stringify } from 'yaml'
 
 type ContextInfo = { name: string; namespace: string }
@@ -26,7 +64,49 @@ type Column = {
   header: string
   value: (object: any, now: number) => React.ReactNode
   align?: 'left' | 'center' | 'right'
+  sortValue?: (object: any) => string | number
 }
+type SortDirection = 'asc' | 'desc'
+type SortState = { header: string; direction: SortDirection } | null
+
+const prefersDarkMode = typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(prefers-color-scheme: dark)').matches
+
+const theme = createTheme({
+  palette: {
+    mode: prefersDarkMode ? 'dark' : 'light',
+    primary: {
+      main: '#2563eb',
+    },
+  },
+  shape: {
+    borderRadius: 8,
+  },
+  typography: {
+    fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial",
+  },
+  components: {
+    MuiTableCell: {
+      styleOverrides: {
+        head: {
+          fontSize: 12,
+          fontWeight: 700,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+        },
+        body: {
+          fontSize: 13,
+        },
+      },
+    },
+    MuiTooltip: {
+      defaultProps: {
+        arrow: true,
+      },
+    },
+  },
+})
 
 const eventSupportedResources = new Set([
   'pods',
@@ -165,27 +245,36 @@ function name(o: any) {
 }
 
 function NameCell({ name }: { name: string }) {
-  const [copied, setCopied] = useState(false)
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const copyName = (event: React.SyntheticEvent) => {
+    event.stopPropagation()
+    void navigator.clipboard.writeText(name).then(() => {
+      setCopyStatus('copied')
+      window.setTimeout(() => setCopyStatus('idle'), 1200)
+    }).catch((error) => {
+      console.warn(error)
+      setCopyStatus('failed')
+      window.setTimeout(() => setCopyStatus('idle'), 1200)
+    })
+  }
+  const feedback = copyStatus === 'copied' ? 'Copied' : copyStatus === 'failed' ? 'Copy failed' : ''
 
   return (
     <span className="name-cell">
       <span>{name}</span>
       {name && (
-        <button
-          type="button"
-          className="copy-name"
-          title="Copy resource name"
-          aria-label={`Copy ${name}`}
-          onClick={(event) => {
-            event.stopPropagation()
-            void navigator.clipboard.writeText(name).then(() => {
-              setCopied(true)
-              window.setTimeout(() => setCopied(false), 1200)
-            })
-          }}
-        >
-          {copied ? 'Copied' : 'Copy'}
-        </button>
+        <>
+          <button
+            type="button"
+            className="copy-name"
+            title={feedback || 'Copy resource name'}
+            aria-label={feedback ? `${feedback} ${name}` : `Copy ${name}`}
+            onClick={copyName}
+          >
+            <ContentCopyIcon fontSize="small" />
+          </button>
+            <span className="copy-feedback" aria-live="polite">{feedback}</span>
+        </>
       )}
     </span>
   )
@@ -265,7 +354,7 @@ function podRestarts(o: any, now: number) {
 
   const restartAge = relativeDurationSince(lastRestartTime, now)
   if (!restartAge) return restarts
-  return <span title={formatLocalTimestamp(lastRestartTime) || undefined}>{restarts} ({restartAge} ago)</span>
+  return <TimestampTooltip timestamp={lastRestartTime}>{restarts} ({restartAge} ago)</TimestampTooltip>
 }
 
 function podStatuses(o: any) {
@@ -441,7 +530,16 @@ function metricTargetValue(target?: any) {
 function formatDurationSince(timestamp: string | undefined, now = Date.now()) {
   const duration = relativeDurationSince(timestamp, now)
   if (!duration) return ''
-  return <span title={formatLocalTimestamp(timestamp) || undefined}>{duration}</span>
+  return <TimestampTooltip timestamp={timestamp}>{duration}</TimestampTooltip>
+}
+
+function TimestampTooltip({ timestamp, children }: { timestamp: string | undefined; children: React.ReactNode }) {
+  const localTime = formatLocalTimestamp(timestamp)
+  return (
+    <Tooltip title={localTime || ''}>
+      <span>{children}</span>
+    </Tooltip>
+  )
 }
 
 function relativeDurationSince(timestamp: string | undefined, now = Date.now()) {
@@ -540,6 +638,7 @@ export default function App() {
   const [resource, setResource] = useState<string>('pods')
   const [now, setNow] = useState(Date.now())
   const [filters, setFilters] = useState<TableFilters>(emptyFilters)
+  const [sort, setSort] = useState<SortState>(null)
   const [items, setItems] = useState<Map<string, any>>(new Map())
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [detailsTab, setDetailsTab] = useState<DetailsTab>('yaml')
@@ -593,6 +692,7 @@ export default function App() {
     setLogEntries([])
     setLogsError(null)
     setActiveLogContainer('')
+    setSort(null)
     setIsLoading(true)
     setLoadError(null)
     const url = `/sse/${encodeURIComponent(ctx)}/${encodeURIComponent(resource)}`
@@ -651,17 +751,16 @@ export default function App() {
 
   const columns = columnsByResource[resource] || columnsByResource.pods
   const allItems = [...items.values()]
-  const labelsDatalistId = 'label-filter-suggestions'
   const labelFilterSuggestions = useMemo(() => labelSuggestions(allItems), [allItems])
   const showStatusFilter = supportsStatusFilter(resource)
   const statusFilterSuggestions = useMemo(() => statusSuggestions(resource, allItems), [resource, allItems])
   const filteredItems = allItems.filter(item => matchesFilters(resource, item, filters))
-  const sortedItems = sortItems(resource, filteredItems)
+  const sortedItems = sortItems(resource, filteredItems, sort)
   const selectedItem = selectedKey ? items.get(selectedKey) : null
   const detailsItem = selectedItem && (showFullDetails ? selectedItem : cleanKubernetesObject(selectedItem))
   const supportsEvents = Boolean(selectedItem && eventSupportedResources.has(resource))
   const supportsLogs = Boolean(selectedItem && logSupportedResources.has(resource))
-  const sortedSelectedEvents = sortItems('events', [...selectedEvents.values()])
+  const sortedSelectedEvents = sortItems('events', [...selectedEvents.values()], null)
   const selectedName = selectedItem?.metadata?.name || ''
   const selectedNamespace = selectedItem?.metadata?.namespace || ''
   const logContainers = useMemo(
@@ -830,323 +929,485 @@ export default function App() {
   }, [autoScrollLogs, sortedLogEntries.length, activeLogContainer])
 
   return (
-    <div className="app">
-      <header>
-        <div className="title-block">
-          <h1>kube-watch</h1>
-          {versionInfo && (
-            <div className="version-status">
-              <span>{versionLabel(versionInfo.version)}</span>
-              {versionInfo.updateAvailable && versionInfo.latestVersion && versionInfo.latestUrl && (
-                <a href={versionInfo.latestUrl} target="_blank" rel="noreferrer">
-                  Update available: {versionInfo.latestVersion}
-                </a>
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box className="app" sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
+        <AppBar position="static" color="default" elevation={1}>
+          <Toolbar sx={{ gap: 2, alignItems: { xs: 'stretch', sm: 'center' }, flexDirection: { xs: 'column', sm: 'row' }, py: { xs: 1, sm: 0 } }}>
+            <Box sx={{ flex: 1, display: 'flex', alignItems: 'baseline', gap: 1.5 }}>
+              <Typography variant="h6" component="h1">kube-watch</Typography>
+              {versionInfo && (
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                  <Chip size="small" label={versionLabel(versionInfo.version)} />
+                  {versionInfo.updateAvailable && versionInfo.latestVersion && versionInfo.latestUrl && (
+                    <Link href={versionInfo.latestUrl} target="_blank" rel="noreferrer" sx={{ fontSize: 13, fontWeight: 700 }}>
+                      Update available: {versionInfo.latestVersion}
+                    </Link>
+                  )}
+                </Stack>
               )}
-            </div>
+            </Box>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ minWidth: { sm: 420 } }}>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="context-select-label">Context</InputLabel>
+                <Select
+                  labelId="context-select-label"
+                  id="context-select"
+                  label="Context"
+                  value={ctx}
+                  onChange={e => setCtx(e.target.value)}
+                >
+                  <MenuItem value=""><em>Select context</em></MenuItem>
+                  {contexts.map(c => <MenuItem key={c.name} value={c.name}>{c.name} ({c.namespace})</MenuItem>)}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="resource-select-label">Resource</InputLabel>
+                <Select
+                  labelId="resource-select-label"
+                  id="resource-select"
+                  label="Resource"
+                  value={resource}
+                  onChange={e => setResource(e.target.value)}
+                >
+                  <MenuItem value="pods">pods</MenuItem>
+                  <MenuItem value="deployments">deployments</MenuItem>
+                  <MenuItem value="statefulsets">statefulsets</MenuItem>
+                  <MenuItem value="replicasets">replicasets</MenuItem>
+                  <MenuItem value="services">services</MenuItem>
+                  <MenuItem value="jobs">jobs</MenuItem>
+                  <MenuItem value="cronjobs">cronjobs</MenuItem>
+                  <MenuItem value="hpas">hpas</MenuItem>
+                  <MenuItem value="configmaps">configmaps</MenuItem>
+                  <MenuItem value="secrets">secrets</MenuItem>
+                  <MenuItem value="serviceaccounts">serviceaccounts</MenuItem>
+                  <MenuItem value="poddisruptionbudgets">poddisruptionbudgets</MenuItem>
+                  <MenuItem value="networkpolicies">networkpolicies</MenuItem>
+                  <MenuItem value="events">events</MenuItem>
+                </Select>
+              </FormControl>
+            </Stack>
+          </Toolbar>
+        </AppBar>
+        <Box component="main" className={selectedItem ? 'has-details' : undefined} sx={{ p: 2 }}>
+          {isLoading && (
+            <Alert icon={<CircularProgress size={16} />} severity="info" role="status" sx={{ mb: 2 }}>
+              Loading {resource}...
+            </Alert>
           )}
-        </div>
-        <div className="controls">
-          <select value={ctx} onChange={e=>setCtx(e.target.value)}>
-            <option value="">Select context</option>
-            {contexts.map(c=> <option key={c.name} value={c.name}>{c.name} ({c.namespace})</option>)}
-          </select>
-          <select value={resource} onChange={e=>setResource(e.target.value)}>
-            <option value="pods">pods</option>
-            <option value="deployments">deployments</option>
-            <option value="statefulsets">statefulsets</option>
-            <option value="replicasets">replicasets</option>
-            <option value="services">services</option>
-            <option value="jobs">jobs</option>
-            <option value="cronjobs">cronjobs</option>
-            <option value="hpas">hpas</option>
-            <option value="configmaps">configmaps</option>
-            <option value="secrets">secrets</option>
-            <option value="serviceaccounts">serviceaccounts</option>
-            <option value="poddisruptionbudgets">poddisruptionbudgets</option>
-            <option value="networkpolicies">networkpolicies</option>
-            <option value="events">events</option>
-          </select>
-        </div>
-      </header>
-      <main className={selectedItem ? 'has-details' : undefined}>
-        {isLoading && (
-          <div className="loading-banner" role="status">
-            <span className="spinner" aria-hidden="true" />
-            Loading {resource}...
-          </div>
-        )}
-        {loadError && !isLoading && <div className="error-banner">{loadError}</div>}
-        <section className="filter-bar" aria-label="Table filters">
-          <label>
-            Name contains
-            <input
-              type="search"
-              value={filters.name}
-              onChange={event => setFilters(prev => ({ ...prev, name: event.target.value }))}
-              placeholder="api"
-            />
-          </label>
-          {showStatusFilter && (
-            <label>
-              Status equals
-              <select
-                value={filters.status}
-                onChange={event => setFilters(prev => ({ ...prev, status: event.target.value }))}
-              >
-                <option value="">Any status</option>
-                {statusFilterSuggestions.map(status => (
-                  <option key={status} value={status}>{status}</option>
-                ))}
-              </select>
-            </label>
-          )}
-          <label>
-            Labels
-            <input
-              type="search"
-              list={labelsDatalistId}
-              value={filters.labels}
-              onChange={event => setFilters(prev => ({ ...prev, labels: event.target.value }))}
-              placeholder="app.kubernetes.io/name: simtool-api"
-            />
-            <datalist id={labelsDatalistId}>
-              {labelFilterSuggestions.map(suggestion => (
-                <option key={suggestion} value={suggestion} />
-              ))}
-            </datalist>
-          </label>
-          <select
-            aria-label="Label suggestions"
-            value=""
-            onChange={event => {
-              if (event.target.value) {
-                setFilters(prev => ({ ...prev, labels: event.target.value }))
-              }
+          {loadError && !isLoading && <Alert severity="error" sx={{ mb: 2 }}>{loadError}</Alert>}
+          <Paper component="section" aria-label="Table filters" variant="outlined" sx={{ mb: 2, p: 1.5 }}>
+            <Stack direction="row" useFlexGap spacing={1.5} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+              <TextField
+                label="Name contains"
+                type="search"
+                size="small"
+                value={filters.name}
+                onChange={event => setFilters(prev => ({ ...prev, name: event.target.value }))}
+                placeholder="api"
+              />
+              {showStatusFilter && (
+                <FormControl size="small" sx={{ minWidth: 180 }}>
+                  <InputLabel id="status-filter-label">Status equals</InputLabel>
+                  <Select
+                    labelId="status-filter-label"
+                    id="status-filter"
+                    label="Status equals"
+                    value={filters.status}
+                    onChange={event => setFilters(prev => ({ ...prev, status: event.target.value }))}
+                  >
+                    <MenuItem value=""><em>Any status</em></MenuItem>
+                    {statusFilterSuggestions.map(status => (
+                      <MenuItem key={status} value={status}>{status}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+              <Autocomplete
+                freeSolo
+                openOnFocus
+                options={labelFilterSuggestions}
+                value={filters.labels}
+                inputValue={filters.labels}
+                onInputChange={(_, value) => setFilters(prev => ({ ...prev, labels: value }))}
+                onChange={(_, value) => {
+                  if (typeof value === 'string') {
+                    setFilters(prev => ({ ...prev, labels: value }))
+                  }
+                }}
+                sx={{ minWidth: 340 }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Labels"
+                    type="search"
+                    size="small"
+                    placeholder="app.kubernetes.io/name: simtool-api"
+                  />
+                )}
+              />
+              {resource === 'pods' && (
+                <FormControlLabel
+                  control={(
+                    <Checkbox
+                      checked={filters.podRestartsOnly}
+                      onChange={event => setFilters(prev => ({ ...prev, podRestartsOnly: event.target.checked }))}
+                    />
+                  )}
+                  label="Restarts > 0"
+                />
+              )}
+              {(resource === 'pods' || resource === 'deployments' || resource === 'statefulsets') && (
+                <FormControlLabel
+                  control={(
+                    <Checkbox
+                      checked={filters.notReadyOnly}
+                      onChange={event => setFilters(prev => ({ ...prev, notReadyOnly: event.target.checked }))}
+                    />
+                  )}
+                  label="Not ready"
+                />
+              )}
+              {hasActiveFilters(filters) && (
+                <Button type="button" variant="outlined" onClick={() => setFilters(emptyFilters)}>
+                  Clear filters
+                </Button>
+              )}
+              <Chip size="small" variant="outlined" label={`${sortedItems.length}/${allItems.length} shown`} sx={{ ml: 'auto' }} />
+            </Stack>
+          </Paper>
+          <TableContainer
+            component={Paper}
+            variant="outlined"
+            className="resource-table"
+            sx={{ maxHeight: selectedItem ? '42vh' : 'calc(100vh - 190px)' }}
+          >
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow>
+                  {columns.map(column => {
+                    const active = sort?.header === column.header
+                    return (
+                      <TableCell key={column.header} align={column.align} sortDirection={active ? sort.direction : false}>
+                        <TableSortLabel
+                          active={active}
+                          direction={active ? sort.direction : 'asc'}
+                          onClick={() => setSort(prev => nextSort(prev, column.header))}
+                        >
+                          {column.header}
+                        </TableSortLabel>
+                      </TableCell>
+                    )
+                  })}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {sortedItems.map((o: any) => {
+                  const key = objectKey(o)
+                  return (
+                    <TableRow
+                      key={key}
+                      selected={selectedKey === key}
+                      hover
+                      sx={{ cursor: 'pointer' }}
+                      onClick={() => setSelectedKey(prev => {
+                        const next = prev === key ? null : key
+                        if (next !== prev) {
+                          setShowFullDetails(false)
+                          setDetailsTab('yaml')
+                          setLogEntries([])
+                          setLogsError(null)
+                          setActiveLogContainer('')
+                        }
+                        return next
+                      })}
+                    >
+                      {columns.map(column => <TableCell key={column.header} align={column.align}>{column.value(o, now)}</TableCell>)}
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          <Drawer
+            anchor="bottom"
+            open={Boolean(selectedItem)}
+            variant="persistent"
+            slotProps={{
+              paper: {
+                className: 'details-panel',
+                sx: {
+                  right: 12,
+                  bottom: 12,
+                  left: 12,
+                  width: 'auto',
+                  maxHeight: '42vh',
+                  borderRadius: 2,
+                  overflow: 'hidden',
+                },
+              },
             }}
           >
-            <option value="">Label suggestions</option>
-            {labelFilterSuggestions.map(suggestion => (
-              <option key={suggestion} value={suggestion}>{suggestion}</option>
-            ))}
-          </select>
-          {resource === 'pods' && (
-            <label className="checkbox-filter">
-              <input
-                type="checkbox"
-                checked={filters.podRestartsOnly}
-                onChange={event => setFilters(prev => ({ ...prev, podRestartsOnly: event.target.checked }))}
-              />
-              Restarts &gt; 0
-            </label>
-          )}
-          {(resource === 'pods' || resource === 'deployments' || resource === 'statefulsets') && (
-            <label className="checkbox-filter">
-              <input
-                type="checkbox"
-                checked={filters.notReadyOnly}
-                onChange={event => setFilters(prev => ({ ...prev, notReadyOnly: event.target.checked }))}
-              />
-              Not ready
-            </label>
-          )}
-          {hasActiveFilters(filters) && (
-            <button type="button" onClick={() => setFilters(emptyFilters)}>
-              Clear filters
-            </button>
-          )}
-          <span className="filter-count">
-            {sortedItems.length}/{allItems.length} shown
-          </span>
-        </section>
-        <section className="resource-table">
-          <table>
-            <thead>
-              <tr>
-                {columns.map(column => <th key={column.header} className={alignClass(column)}>{column.header}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedItems.map((o:any) => {
-                const key = objectKey(o)
-                return (
-                  <tr
-                    key={key}
-                    className={selectedKey === key ? 'selected' : undefined}
-                    onClick={() => setSelectedKey(prev => {
-                      const next = prev === key ? null : key
-                      if (next !== prev) {
-                        setShowFullDetails(false)
-                        setDetailsTab('yaml')
-                        setLogEntries([])
-                        setLogsError(null)
-                        setActiveLogContainer('')
-                      }
-                      return next
-                    })}
-                  >
-                    {columns.map(column => <td key={column.header} className={alignClass(column)}>{column.value(o, now)}</td>)}
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </section>
-        {selectedItem && (
-          <section className="details-panel" aria-label="Selected resource details">
-            <div className="details-header">
-              <h2>{selectedItem.kind || resource}/{selectedItem.metadata?.name || selectedKey}</h2>
-              <div className="details-actions">
-                {detailsTab === 'yaml' && (
-                  <button type="button" onClick={() => setShowFullDetails(prev => !prev)}>
-                    {showFullDetails ? 'Hide housekeeping' : 'Show full YAML'}
-                  </button>
-                )}
-                <button type="button" onClick={() => {
-                  setSelectedKey(null)
-                  setShowFullDetails(false)
-                  setDetailsTab('yaml')
-                }}>Close</button>
-              </div>
-            </div>
-            <div className="details-tabs" role="tablist">
-              <button
-                type="button"
-                className={detailsTab === 'yaml' ? 'active' : undefined}
-                onClick={() => setDetailsTab('yaml')}
-              >
-                YAML
-              </button>
-              {supportsEvents && (
-                <button
-                  type="button"
-                  className={detailsTab === 'events' ? 'active' : undefined}
-                  onClick={() => setDetailsTab('events')}
-                >
-                  Events
-                </button>
-              )}
-              {supportsLogs && (
-                <button
-                  type="button"
-                  className={detailsTab === 'logs' ? 'active' : undefined}
-                  onClick={() => setDetailsTab('logs')}
-                >
-                  Logs
-                </button>
-              )}
-            </div>
-            {detailsTab === 'yaml' && <pre>{stringify(detailsItem)}</pre>}
-            {detailsTab === 'events' && supportsEvents && (
-              <div className="event-details">
-                {eventsLoading && (
-                  <div className="inline-status">
-                    <span className="spinner" aria-hidden="true" />
-                    Loading events...
-                  </div>
-                )}
-                {eventsError && <div className="inline-error">{eventsError}</div>}
-                {!eventsLoading && sortedSelectedEvents.length === 0 && !eventsError && (
-                  <div className="empty-state">No events found for this resource.</div>
-                )}
-                {sortedSelectedEvents.length > 0 && (
-                  <table>
-                    <thead>
-                      <tr>
-                        {columnsByResource.events.map(column => (
-                          <th key={column.header} className={alignClass(column)}>{column.header}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedSelectedEvents.map((event: any) => (
-                        <tr key={objectKey(event)}>
-                          {columnsByResource.events.map(column => (
-                            <td key={column.header} className={alignClass(column)}>{column.value(event, now)}</td>
+            {selectedItem && (
+              <Box component="section" aria-label="Selected resource details">
+              <Box className="details-header">
+                <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 700 }}>
+                  {selectedItem.kind || resource}/{selectedItem.metadata?.name || selectedKey}
+                </Typography>
+                <Stack direction="row" spacing={1}>
+                  {detailsTab === 'yaml' && (
+                    <Button size="small" variant="outlined" type="button" onClick={() => setShowFullDetails(prev => !prev)}>
+                      {showFullDetails ? 'Hide housekeeping' : 'Show full YAML'}
+                    </Button>
+                  )}
+                  <Tooltip title="Close details">
+                    <IconButton size="small" type="button" aria-label="Close" onClick={() => {
+                      setSelectedKey(null)
+                      setShowFullDetails(false)
+                      setDetailsTab('yaml')
+                    }}>
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Stack>
+              </Box>
+              <Tabs value={detailsTab} onChange={(_, value: DetailsTab) => setDetailsTab(value)} sx={{ px: 1.5 }}>
+                <Tab value="yaml" label="YAML" />
+                {supportsEvents && <Tab value="events" label="Events" />}
+                {supportsLogs && <Tab value="logs" label="Logs" />}
+              </Tabs>
+              {detailsTab === 'yaml' && <pre>{stringify(detailsItem)}</pre>}
+              {detailsTab === 'events' && supportsEvents && (
+                <Box className="event-details">
+                  {eventsLoading && (
+                    <Alert icon={<CircularProgress size={16} />} severity="info" className="inline-status">
+                      Loading events...
+                    </Alert>
+                  )}
+                  {eventsError && <Alert severity="error" className="inline-error">{eventsError}</Alert>}
+                  {!eventsLoading && sortedSelectedEvents.length === 0 && !eventsError && (
+                    <Alert severity="info" className="empty-state">No events found for this resource.</Alert>
+                  )}
+                  {sortedSelectedEvents.length > 0 && (
+                    <TableContainer component={Paper} sx={{ border: 1, borderColor: 'divider', maxHeight: '28vh' }}>
+                      <Table size="small" stickyHeader>
+                        <TableHead>
+                          <TableRow>
+                            {columnsByResource.events.map(column => (
+                              <TableCell key={column.header} align={column.align}>{column.header}</TableCell>
+                            ))}
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {sortedSelectedEvents.map((event: any) => (
+                            <TableRow key={objectKey(event)}>
+                              {columnsByResource.events.map(column => (
+                                <TableCell key={column.header} align={column.align}>{column.value(event, now)}</TableCell>
+                              ))}
+                            </TableRow>
                           ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            )}
-            {detailsTab === 'logs' && supportsLogs && (
-              <div ref={logDetailsRef} className="log-details">
-                <div className="log-controls">
-                  <div className="log-options">
-                    <label>
-                      Tail lines
-                      <input
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+                </Box>
+              )}
+              {detailsTab === 'logs' && supportsLogs && (
+                <Box ref={logDetailsRef} className="log-details">
+                  <Box className="log-controls">
+                    <Stack direction="row" spacing={1.5} className="log-options" sx={{ alignItems: 'center' }}>
+                      <TextField
+                        label="Tail lines"
                         type="number"
-                        min="0"
-                        max="5000"
+                        size="small"
                         value={logTailLines}
+                        slotProps={{ htmlInput: { min: 0, max: 5000 } }}
                         onChange={(event) => {
                           const next = Number.parseInt(event.target.value, 10)
                           if (Number.isFinite(next)) {
                             setLogTailLines(Math.max(0, Math.min(5000, next)))
                           }
                         }}
+                        sx={{ width: 120 }}
                       />
-                    </label>
-                    <span>Live follow</span>
-                    <button type="button" onClick={() => setAutoScrollLogs(prev => !prev)}>
-                      Auto scroll {autoScrollLogs ? 'on' : 'off'}
-                    </button>
-                  </div>
-                  {logContainers.length > 0 && (
-                    <div className="container-tabs" role="tablist" aria-label="Log containers">
-                      {logContainers.map(container => (
-                        <button
-                          key={container}
-                          type="button"
-                          className={activeLogContainer === container ? 'active' : undefined}
-                          onClick={() => setActiveLogContainer(container)}
-                        >
-                          {container}
-                        </button>
-                      ))}
-                    </div>
+                      <Chip size="small" label="Live follow" />
+                      <Button size="small" variant="outlined" type="button" onClick={() => setAutoScrollLogs(prev => !prev)}>
+                        Auto scroll {autoScrollLogs ? 'on' : 'off'}
+                      </Button>
+                    </Stack>
+                    {logContainers.length > 0 && (
+                      <Tabs
+                        className="container-tabs"
+                        value={activeLogContainer}
+                        onChange={(_, value: string) => setActiveLogContainer(value)}
+                        variant="scrollable"
+                        scrollButtons="auto"
+                        aria-label="Log containers"
+                      >
+                        {logContainers.map(container => (
+                          <Tab key={container} value={container} label={container} />
+                        ))}
+                      </Tabs>
+                    )}
+                  </Box>
+                  {logsLoading && (
+                    <Alert icon={<CircularProgress size={16} />} severity="info" className="inline-status">
+                      Loading logs...
+                    </Alert>
                   )}
-                </div>
-                {logsLoading && (
-                  <div className="inline-status">
-                    <span className="spinner" aria-hidden="true" />
-                    Loading logs...
-                  </div>
-                )}
-                {logsError && <div className="inline-error">{logsError}</div>}
-                {!logsLoading && !logsError && logContainers.length === 0 && (
-                  <div className="empty-state">No containers found for this {resource === 'pods' ? 'pod' : 'deployment'}.</div>
-                )}
-                {!logsLoading && !logsError && logContainers.length > 0 && sortedLogEntries.length === 0 && (
-                  <div className="empty-state">Waiting for log lines for container {activeLogContainer}...</div>
-                )}
-                {sortedLogEntries.length > 0 && (
-                  <div className="log-output" aria-label={`Logs for ${activeLogContainer}`}>
-                    {sortedLogEntries.map(entry => (
-                      <div key={logEntryKey(entry)} className="log-line">
-                        <span className="log-time">{formatLogTimestamp(entry.timestamp)} </span>
-                        <span className="log-pod">{entry.pod}: </span>
-                        <span className="log-message">{entry.line}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                  {logsError && <Alert severity="error" className="inline-error">{logsError}</Alert>}
+                  {!logsLoading && !logsError && logContainers.length === 0 && (
+                    <Alert severity="info" className="empty-state">No containers found for this {resource === 'pods' ? 'pod' : 'deployment'}.</Alert>
+                  )}
+                  {!logsLoading && !logsError && logContainers.length > 0 && sortedLogEntries.length === 0 && (
+                    <Alert severity="info" className="empty-state">Waiting for log lines for container {activeLogContainer}...</Alert>
+                  )}
+                  {sortedLogEntries.length > 0 && (
+                    <Box className="log-output" aria-label={`Logs for ${activeLogContainer}`}>
+                      {sortedLogEntries.map(entry => (
+                        <Box key={logEntryKey(entry)} className="log-line">
+                          <span className="log-time">{formatLogTimestamp(entry.timestamp)} </span>
+                          <span className="log-pod">{entry.pod}: </span>
+                          <span className="log-message">{entry.line}</span>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+                </Box>
+              )}
+              </Box>
             )}
-          </section>
-        )}
-      </main>
-    </div>
+          </Drawer>
+        </Box>
+      </Box>
+    </ThemeProvider>
   )
 }
 
-function sortItems(resource: string, values: any[]) {
+function sortItems(resource: string, values: any[], sort: SortState) {
+  if (sort) {
+    return values.sort((a, b) => compareSortValues(
+      tableSortValue(resource, sort.header, a),
+      tableSortValue(resource, sort.header, b),
+      sort.direction,
+    ))
+  }
   if (resource === 'events') {
     return values.sort((a, b) => eventTimestamp(b) - eventTimestamp(a))
   }
   return values.sort((a, b) => (a.metadata?.name || '').localeCompare(b.metadata?.name || ''))
+}
+
+function nextSort(current: SortState, header: string): SortState {
+  if (current?.header !== header) return { header, direction: 'asc' }
+  if (current.direction === 'asc') return { header, direction: 'desc' }
+  return null
+}
+
+function compareSortValues(a: string | number, b: string | number, direction: SortDirection) {
+  const result = typeof a === 'number' && typeof b === 'number'
+    ? a - b
+    : String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })
+  return direction === 'asc' ? result : -result
+}
+
+function tableSortValue(resource: string, header: string, object: any): string | number {
+  switch (header) {
+    case 'NAME':
+      return object.metadata?.name || ''
+    case 'READY':
+      return readySortValue(resource, object)
+    case 'STATUS':
+      return resourceStatus(resource, object)
+    case 'RESTARTS':
+      return podRestartCount(object)
+    case 'AGE':
+      return timestampSortValue(object.metadata?.creationTimestamp)
+    case 'NODE':
+      return object.spec?.nodeName || ''
+    case 'UP-TO-DATE':
+      return object.status?.updatedReplicas || 0
+    case 'AVAILABLE':
+      return object.status?.availableReplicas || 0
+    case 'DESIRED':
+      return object.spec?.replicas ?? 0
+    case 'CURRENT':
+      return object.status?.replicas ?? 0
+    case 'TYPE':
+      return object.spec?.type || object.type || ''
+    case 'CLUSTER-IP':
+      return object.spec?.clusterIP || ''
+    case 'EXTERNAL-IP':
+      return serviceExternalIP(object)
+    case 'PORT(S)':
+      return servicePorts(object)
+    case 'COMPLETIONS':
+      return object.status?.succeeded || 0
+    case 'DURATION':
+      return durationSortValue(object)
+    case 'SCHEDULE':
+      return object.spec?.schedule || ''
+    case 'TIMEZONE':
+      return object.spec?.timeZone || ''
+    case 'SUSPEND':
+      return object.spec?.suspend ? 1 : 0
+    case 'ACTIVE':
+      return object.status?.active?.length || 0
+    case 'LAST SCHEDULE':
+      return timestampSortValue(object.status?.lastScheduleTime)
+    case 'REFERENCE':
+      return hpaReference(object)
+    case 'TARGETS':
+      return hpaTargets(object)
+    case 'MINPODS':
+      return object.spec?.minReplicas ?? 1
+    case 'MAXPODS':
+      return object.spec?.maxReplicas ?? 0
+    case 'REPLICAS':
+      return object.status?.currentReplicas ?? 0
+    case 'DATA':
+      return Object.keys(object.data || {}).length
+    case 'SECRETS':
+      return object.secrets?.length || 0
+    case 'MIN AVAILABLE':
+      return String(object.spec?.minAvailable ?? '')
+    case 'MAX UNAVAILABLE':
+      return String(object.spec?.maxUnavailable ?? '')
+    case 'ALLOWED DISRUPTIONS':
+      return object.status?.disruptionsAllowed ?? 0
+    case 'POD-SELECTOR':
+      return labelSelector(object.spec?.podSelector)
+    case 'LAST SEEN':
+      return eventTimestamp(object)
+    case 'REASON':
+      return object.reason || ''
+    case 'OBJECT':
+      return eventObject(object)
+    case 'MESSAGE':
+      return object.message || ''
+    default:
+      return object.metadata?.name || ''
+  }
+}
+
+function readySortValue(resource: string, object: any) {
+  if (resource === 'pods') {
+    const statuses = object.status?.containerStatuses || []
+    return statuses.filter((status: any) => status.ready).length
+  }
+  return object.status?.readyReplicas ?? 0
+}
+
+function timestampSortValue(timestamp: string | undefined) {
+  if (!timestamp) return 0
+  const value = new Date(timestamp).getTime()
+  return Number.isFinite(value) ? value : 0
+}
+
+function durationSortValue(object: any) {
+  const start = timestampSortValue(object.status?.startTime)
+  const end = timestampSortValue(object.status?.completionTime)
+  return start && end ? end - start : 0
 }
 
 function eventTimestamp(o: any) {

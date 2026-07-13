@@ -79,118 +79,37 @@ header h1 { margin: 0; font-size: 18px }
   color: #fbbf24;
   font-weight: 600;
 }
-.controls select {
-  margin-left: 8px;
-  background: var(--control-background);
-  color: var(--control-foreground);
-  border: 1px solid var(--control-border);
-}
 main { padding: 12px }
 main.has-details { padding-bottom: 42vh }
-.filter-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  margin-bottom: 12px;
-  padding: 8px 10px;
-  border: 1px solid var(--row-border);
-  border-radius: 6px;
-  background: var(--panel-background);
-}
-.filter-bar label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-}
-.filter-bar input[type="search"],
-.filter-bar select {
-  width: 180px;
-  background: var(--control-background);
-  color: var(--control-foreground);
-  border: 1px solid var(--control-border);
-  border-radius: 4px;
-  padding: 4px 6px;
-}
-.filter-bar select {
-  width: 220px;
-}
-.checkbox-filter input {
-  margin: 0;
-}
-.filter-bar button {
-  background: var(--control-background);
-  color: var(--control-foreground);
-  border: 1px solid var(--control-border);
-  border-radius: 4px;
-  padding: 4px 8px;
-}
-.filter-count {
-  margin-left: auto;
-  font-size: 13px;
-  color: var(--log-time);
-}
-.loading-banner,
-.error-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding: 8px 10px;
-  border: 1px solid;
-  border-radius: 6px;
-}
-.loading-banner {
-  background: var(--banner-background);
-  border-color: var(--banner-border);
-  color: var(--banner-foreground);
-}
-.error-banner {
-  background: var(--error-background);
-  border-color: var(--error-border);
-  color: var(--error-foreground);
-}
-.spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.75s linear infinite;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
 .resource-table { overflow: auto }
-table { width: 100%; border-collapse: collapse }
-th, td { padding: 8px; border-bottom: 1px solid var(--row-border) }
-th { text-align: left }
-.align-center { text-align: center }
-.align-right { text-align: right }
 .name-cell {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 .copy-name {
-  opacity: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--control-border);
+  border-radius: 50%;
   background: var(--control-background);
   color: var(--control-foreground);
-  border: 1px solid var(--control-border);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 12px;
   cursor: pointer;
-  user-select: none;
+  opacity: 0;
 }
-tr:hover .copy-name,
-.copy-name:focus {
+.copy-name:focus,
+.copy-name:has(+ .copy-feedback:not(:empty)),
+tr:hover .copy-name {
   opacity: 1;
 }
-tbody tr { cursor: pointer }
-tr:hover { background: var(--row-hover) }
-tr.selected { background: var(--row-selected) }
+.copy-feedback {
+  min-width: 42px;
+  font-size: 12px;
+  color: var(--log-time);
+}
 .details-panel {
   position: fixed;
   right: 12px;
@@ -216,25 +135,6 @@ tr.selected { background: var(--row-selected) }
 .details-actions {
   display: flex;
   gap: 8px;
-}
-.details-panel button {
-  background: var(--control-background);
-  color: var(--control-foreground);
-  border: 1px solid var(--control-border);
-  border-radius: 4px;
-  padding: 4px 8px;
-}
-.details-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 8px 12px 0;
-}
-.details-tabs button {
-  border-bottom-right-radius: 0;
-  border-bottom-left-radius: 0;
-}
-.details-tabs button.active {
-  background: var(--row-selected);
 }
 .details-panel pre {
   margin: 0;
@@ -273,33 +173,9 @@ tr.selected { background: var(--row-selected) }
   gap: 12px;
   flex: 0 0 auto;
 }
-.log-options label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-.log-options input {
-  width: 88px;
-  background: var(--control-background);
-  color: var(--control-foreground);
-  border: 1px solid var(--control-border);
-  border-radius: 4px;
-  padding: 3px 6px;
-}
 .container-tabs {
-  display: flex;
   flex: 1 1 auto;
-  gap: 4px;
   min-width: 0;
-  overflow-x: auto;
-  white-space: nowrap;
-}
-.container-tabs button {
-  flex: 0 0 auto;
-}
-.container-tabs button.active {
-  background: var(--row-selected);
 }
 .log-output {
   min-height: 20vh;

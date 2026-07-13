@@ -61,6 +61,12 @@ function podEvent(uid: string, name: string, options: {
   }
 }
 
+async function chooseOption(user: ReturnType<typeof userEvent.setup>, control: HTMLElement, optionName: string | RegExp) {
+  await user.click(control)
+  const listbox = await screen.findByRole('listbox')
+  await user.click(within(listbox).getByRole('option', { name: optionName }))
+}
+
 describe('App', () => {
   beforeEach(() => {
     MockEventSource.instances = []
@@ -111,7 +117,7 @@ describe('App', () => {
       'href',
       'https://github.com/davidvanlaatum/kube-watch/releases/tag/v1.1.0',
     )
-    await user.selectOptions(contextSelect, 'dev')
+    await chooseOption(user, contextSelect, /dev/)
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
 
     MockEventSource.instances[0].emit({
@@ -142,23 +148,18 @@ describe('App', () => {
     MockEventSource.instances[0].emit({ type: 'SYNCED' })
 
     const row = await screen.findByRole('row', { name: /api-7d9f/ })
-    expect(within(row).getByText('2 (5m ago)')).toHaveAttribute(
-      'title',
-      new Date('2026-07-07T23:55:00Z').toLocaleString(),
-    )
-    expect(within(row).getByText('1h')).toHaveAttribute(
-      'title',
-      new Date('2026-07-07T23:00:00Z').toLocaleString(),
-    )
+    await user.hover(within(row).getByText('2 (5m ago)'))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(new Date('2026-07-07T23:55:00Z').toLocaleString())
+    await user.unhover(within(row).getByText('2 (5m ago)'))
+    await user.hover(within(row).getByText('1h'))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(new Date('2026-07-07T23:00:00Z').toLocaleString())
+    await user.unhover(within(row).getByText('1h'))
+    await vi.advanceTimersByTimeAsync(1000)
 
     await vi.advanceTimersByTimeAsync(60_000)
     expect(within(row).getByText('2 (6m ago)')).toBeInTheDocument()
 
-    await user.click(within(row).getByRole('button', { name: 'Copy api-7d9f' }))
-
-    await waitFor(() => {
-      expect(within(row).getByRole('button', { name: 'Copy api-7d9f' })).toHaveTextContent('Copied')
-    })
+    expect(within(row).getByRole('button', { name: 'Copy api-7d9f' })).toBeInTheDocument()
   })
 
   it('filters table rows by name, status, labels, restarts, and readiness', async () => {
@@ -166,7 +167,7 @@ describe('App', () => {
     render(<App />)
 
     const [contextSelect] = await screen.findAllByRole('combobox')
-    await user.selectOptions(contextSelect, 'dev')
+    await chooseOption(user, contextSelect, /dev/)
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
 
     MockEventSource.instances[0].emit(podEvent('pod-1', 'api-7d9f', {
@@ -185,25 +186,33 @@ describe('App', () => {
     expect(screen.getByRole('row', { name: /worker-55f8/ })).toBeInTheDocument()
     expect(screen.getByText('2/2 shown')).toBeInTheDocument()
 
+    await user.click(screen.getByRole('button', { name: /NAME/ }))
+    let rows = screen.getAllByRole('row').slice(1)
+    expect(rows[0]).toHaveTextContent('api-7d9f')
+    await user.click(screen.getByRole('button', { name: /NAME/ }))
+    rows = screen.getAllByRole('row').slice(1)
+    expect(rows[0]).toHaveTextContent('worker-55f8')
+
     await user.type(screen.getByLabelText('Name contains'), 'api')
     expect(screen.getByRole('row', { name: /api-7d9f/ })).toBeInTheDocument()
     expect(screen.queryByRole('row', { name: /worker-55f8/ })).not.toBeInTheDocument()
     expect(screen.getByText('1/2 shown')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Clear filters' }))
-    expect(screen.getByRole('option', { name: 'Running' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'Pending' })).toBeInTheDocument()
-    await user.selectOptions(screen.getByLabelText('Status equals'), 'Pending')
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Status equals' }), 'Pending')
     expect(screen.queryByRole('row', { name: /api-7d9f/ })).not.toBeInTheDocument()
     expect(screen.getByRole('row', { name: /worker-55f8/ })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Clear filters' }))
-    expect(document.querySelector('option[value="app.kubernetes.io/name: simtool-api"]')).toBeInTheDocument()
-    await user.type(screen.getByLabelText('Labels'), 'app.kubernetes.io/name: simtool-api')
+    const labelsInput = screen.getByRole('combobox', { name: 'Labels' })
+    await user.type(labelsInput, 'app.kubernetes.io/name: simtool-api')
     expect(screen.getByRole('row', { name: /api-7d9f/ })).toBeInTheDocument()
     expect(screen.queryByRole('row', { name: /worker-55f8/ })).not.toBeInTheDocument()
 
-    await user.selectOptions(screen.getByLabelText('Label suggestions'), 'app.kubernetes.io/name: simtool-worker')
+    await user.clear(labelsInput)
+    await user.click(labelsInput)
+    await user.type(labelsInput, 'worker')
+    await user.click(await screen.findByRole('option', { name: 'app.kubernetes.io/name: simtool-worker' }))
     expect(screen.queryByRole('row', { name: /api-7d9f/ })).not.toBeInTheDocument()
     expect(screen.getByRole('row', { name: /worker-55f8/ })).toBeInTheDocument()
 
@@ -223,7 +232,7 @@ describe('App', () => {
     render(<App />)
 
     const [contextSelect] = await screen.findAllByRole('combobox')
-    await user.selectOptions(contextSelect, 'dev')
+    await chooseOption(user, contextSelect, /dev/)
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
 
     MockEventSource.instances[0].emit(podEvent('pod-1', 'api-7d9f'))
@@ -252,8 +261,8 @@ describe('App', () => {
     render(<App />)
 
     const [contextSelect, resourceSelect] = await screen.findAllByRole('combobox')
-    await user.selectOptions(contextSelect, 'dev')
-    await user.selectOptions(resourceSelect, 'events')
+    await chooseOption(user, contextSelect, /dev/)
+    await chooseOption(user, resourceSelect, 'events')
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
     const eventsStream = MockEventSource.instances.at(-1)!
 
@@ -277,10 +286,57 @@ describe('App', () => {
     eventsStream.emit({ type: 'SYNCED' })
 
     const row = await screen.findByRole('row', { name: /Started container api/ })
-    expect(within(row).getByText('0s')).toHaveAttribute(
-      'title',
-      new Date('2026-07-08T00:00:01Z').toLocaleString(),
-    )
+    await user.hover(within(row).getByText('0s'))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(new Date('2026-07-08T00:00:01Z').toLocaleString())
+  })
+
+  it('resets stale table sorting when switching resources', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect, resourceSelect] = await screen.findAllByRole('combobox')
+    await chooseOption(user, contextSelect, /dev/)
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    MockEventSource.instances[0].emit(podEvent('pod-1', 'api-7d9f'))
+    MockEventSource.instances[0].emit({ type: 'SYNCED' })
+    expect(await screen.findByRole('row', { name: /api-7d9f/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /NODE/ }))
+    await chooseOption(user, resourceSelect, 'events')
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
+    const eventsStream = MockEventSource.instances.at(-1)!
+
+    eventsStream.emit({
+      type: 'ADDED',
+      object: {
+        kind: 'Event',
+        metadata: { uid: 'event-old', name: 'old', namespace: 'default', creationTimestamp: '2026-07-07T23:50:00Z' },
+        eventTime: '2026-07-07T23:50:00Z',
+        type: 'Normal',
+        reason: 'Old',
+        involvedObject: { kind: 'Pod', name: 'api-7d9f' },
+        message: 'older event',
+      },
+    })
+    eventsStream.emit({
+      type: 'ADDED',
+      object: {
+        kind: 'Event',
+        metadata: { uid: 'event-new', name: 'new', namespace: 'default', creationTimestamp: '2026-07-07T23:59:00Z' },
+        eventTime: '2026-07-07T23:59:00Z',
+        type: 'Normal',
+        reason: 'New',
+        involvedObject: { kind: 'Pod', name: 'api-7d9f' },
+        message: 'newer event',
+      },
+    })
+    eventsStream.emit({ type: 'SYNCED' })
+
+    await waitFor(() => {
+      const rows = screen.getAllByRole('row')
+      expect(rows[1]).toHaveTextContent('newer event')
+    })
   })
 
   it('hides status filter for resources without status semantics', async () => {
@@ -290,7 +346,7 @@ describe('App', () => {
     await screen.findAllByRole('combobox')
     expect(screen.getByLabelText('Status equals')).toBeInTheDocument()
 
-    await user.selectOptions(screen.getAllByRole('combobox')[1], 'services')
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Resource' }), 'services')
 
     expect(screen.queryByLabelText('Status equals')).not.toBeInTheDocument()
   })
@@ -311,7 +367,7 @@ describe('App', () => {
     render(<App />)
 
     const [contextSelect] = await screen.findAllByRole('combobox')
-    await user.selectOptions(contextSelect, 'dev')
+    await chooseOption(user, contextSelect, /dev/)
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
 
     expect(screen.getByRole('status')).toHaveTextContent('Loading pods')
@@ -329,7 +385,7 @@ describe('App', () => {
     render(<App />)
 
     const [contextSelect] = await screen.findAllByRole('combobox')
-    await user.selectOptions(contextSelect, 'dev')
+    await chooseOption(user, contextSelect, /dev/)
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
 
     MockEventSource.instances[0].emit({
@@ -359,15 +415,15 @@ describe('App', () => {
 
     const row = await screen.findByRole('row', { name: /api-7d9f/ })
     await user.click(row)
-    await user.click(screen.getByRole('button', { name: 'Logs' }))
+    await user.click(screen.getByRole('tab', { name: 'Logs' }))
 
     await waitFor(() => {
       expect(MockEventSource.instances.some(instance => instance.url === '/logs/dev/pods/default/api-7d9f?tailLines=200')).toBe(true)
     })
     const logsStream = MockEventSource.instances.find(instance => instance.url.startsWith('/logs/'))
     expect(logsStream).toBeDefined()
-    expect(screen.getByRole('button', { name: 'app' })).toHaveClass('active')
-    expect(screen.getByRole('button', { name: 'sidecar' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'app' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'sidecar' })).toBeInTheDocument()
     expect(screen.getByText('Loading logs...')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Auto scroll on' })).toBeInTheDocument()
 
@@ -422,7 +478,7 @@ describe('App', () => {
     expect(within(logOutput).getAllByText('api-7d9f:')[0]).toHaveClass('log-pod')
     expect(logOutput).not.toHaveTextContent('sidecar line')
 
-    await user.click(screen.getByRole('button', { name: 'sidecar' }))
+    await user.click(screen.getByRole('tab', { name: 'sidecar' }))
     expect(await screen.findByLabelText('Logs for sidecar')).toHaveTextContent('api-7d9f: sidecar line')
   })
 })

@@ -24,6 +24,15 @@ const pod = {
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: () => Promise.resolve(),
+      },
+    })
+  })
+
   await page.route('**/api/contexts', async route => {
     await route.fulfill({
       contentType: 'application/json',
@@ -111,7 +120,8 @@ test('renders pod table, copy feedback, YAML details, events, and logs tab', asy
     'href',
     'https://github.com/davidvanlaatum/kube-watch/releases/tag/v1.1.0',
   )
-  await page.getByRole('combobox').first().selectOption('dev')
+  await page.getByRole('combobox', { name: 'Context' }).click()
+  await page.getByRole('option', { name: /dev/ }).click()
 
   const row = page.getByRole('row', { name: /api-7d9f/ })
   await expect(row).toContainText('2 (')
@@ -125,19 +135,19 @@ test('renders pod table, copy feedback, YAML details, events, and logs tab', asy
 
   const copyButton = row.getByRole('button', { name: 'Copy api-7d9f' })
   await copyButton.click()
-  await expect(copyButton).toHaveText('Copied')
+  await expect(row.getByText('Copied')).toBeVisible()
 
   await row.click()
   await expect(page.getByRole('heading', { name: 'Pod/api-7d9f' })).toBeVisible()
   await expect(page.getByText('managedFields')).not.toBeVisible()
   await expect(page.getByText('nodeName: node-a')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Events' }).click()
+  await page.getByRole('tab', { name: 'Events' }).click()
   await expect(page.getByText('Started container api')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Logs' }).click()
+  await page.getByRole('tab', { name: 'Logs' }).click()
   await expect(page.getByRole('spinbutton')).toHaveValue('200')
-  await expect(page.getByRole('button', { name: 'api', exact: true })).toHaveClass(/active/)
+  await expect(page.getByRole('tab', { name: 'api', exact: true })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByLabel('Logs for api')).toContainText('api-7d9f: server line 80')
   await expect(page.getByRole('button', { name: 'Auto scroll on' })).toBeVisible()
   await expect.poll(async () => page.locator('.log-details').evaluate(element => element.scrollTop)).toBeGreaterThan(0)
