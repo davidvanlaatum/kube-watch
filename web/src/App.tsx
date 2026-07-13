@@ -68,6 +68,7 @@ type Column = {
 }
 type SortDirection = 'asc' | 'desc'
 type SortState = { header: string; direction: SortDirection } | null
+type ViewRoute = { ctx: string; resource: string }
 
 const prefersDarkMode = typeof window !== 'undefined' &&
   typeof window.matchMedia === 'function' &&
@@ -125,6 +126,7 @@ const eventSupportedResources = new Set([
 ])
 const logSupportedResources = new Set(['pods', 'deployments'])
 const statusFilterResources = new Set(['pods', 'deployments', 'statefulsets', 'jobs', 'events'])
+const defaultResource = 'pods'
 const resourceKinds: Record<string, string> = {
   pods: 'Pod',
   deployments: 'Deployment',
@@ -406,6 +408,11 @@ function labelSuggestions(objects: any[]) {
   return [...suggestions].sort().slice(0, 300)
 }
 
+function contextSelectOptions(contexts: ContextInfo[], selectedContext: string) {
+  if (!selectedContext || contexts.some(context => context.name === selectedContext)) return contexts
+  return [{ name: selectedContext, namespace: 'loading...' }, ...contexts]
+}
+
 function statusSuggestions(resource: string, objects: any[]) {
   const common: Record<string, string[]> = {
     pods: ['Running', 'Pending', 'Succeeded', 'Failed', 'Unknown', 'CrashLoopBackOff', 'ImagePullBackOff', 'ErrImagePull', 'ContainerCreating'],
@@ -631,11 +638,44 @@ function versionLabel(version: string) {
   return version.startsWith('v') ? version : `v${version}`
 }
 
+function currentViewRoute(): ViewRoute {
+  if (typeof window === 'undefined') return { ctx: '', resource: defaultResource }
+  return parseViewRoute(window.location.pathname)
+}
+
+function parseViewRoute(pathname: string): ViewRoute {
+  const parts = pathname.split('/').filter(Boolean)
+  if (parts[0] !== 'view') return { ctx: '', resource: defaultResource }
+
+  const ctx = parts[1] ? safeDecodePathSegment(parts[1]) : ''
+  const resource = supportedResource(parts[2]) ? parts[2] : defaultResource
+  return { ctx, resource }
+}
+
+function viewRoutePath(ctx: string, resource: string) {
+  if (!ctx) return '/'
+  const safeResource = supportedResource(resource) ? resource : defaultResource
+  return `/view/${encodeURIComponent(ctx)}/${safeResource}`
+}
+
+function supportedResource(resource: string | undefined): resource is string {
+  return Boolean(resource && columnsByResource[resource])
+}
+
+function safeDecodePathSegment(value: string) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return ''
+  }
+}
+
 export default function App() {
+  const initialRoute = currentViewRoute()
   const [contexts, setContexts] = useState<ContextInfo[]>([])
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null)
-  const [ctx, setCtx] = useState<string>('')
-  const [resource, setResource] = useState<string>('pods')
+  const [ctx, setCtx] = useState<string>(initialRoute.ctx)
+  const [resource, setResource] = useState<string>(initialRoute.resource)
   const [now, setNow] = useState(Date.now())
   const [filters, setFilters] = useState<TableFilters>(emptyFilters)
   const [sort, setSort] = useState<SortState>(null)
@@ -658,6 +698,32 @@ export default function App() {
   const eventsEsRef = useRef<EventSource | null>(null)
   const logsEsRef = useRef<EventSource | null>(null)
   const logDetailsRef = useRef<HTMLDivElement | null>(null)
+  const routeSyncReadyRef = useRef(false)
+  const handlingPopStateRef = useRef(false)
+
+  useEffect(() => {
+    const onPopState = () => {
+      const next = currentViewRoute()
+      handlingPopStateRef.current = true
+      setCtx(next.ctx)
+      setResource(next.resource)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  useEffect(() => {
+    const nextPath = viewRoutePath(ctx, resource)
+    if (window.location.pathname !== nextPath) {
+      if (routeSyncReadyRef.current && !handlingPopStateRef.current) {
+        window.history.pushState(null, '', nextPath)
+      } else {
+        window.history.replaceState(null, '', nextPath)
+      }
+    }
+    routeSyncReadyRef.current = true
+    handlingPopStateRef.current = false
+  }, [ctx, resource])
 
   useEffect(() => {
     fetch('/api/contexts').then(r => r.json()).then(setContexts).catch(console.error)
@@ -750,6 +816,7 @@ export default function App() {
   }, [ctx, resource])
 
   const columns = columnsByResource[resource] || columnsByResource.pods
+  const contextOptions = contextSelectOptions(contexts, ctx)
   const allItems = [...items.values()]
   const labelFilterSuggestions = useMemo(() => labelSuggestions(allItems), [allItems])
   const showStatusFilter = supportsStatusFilter(resource)
@@ -958,7 +1025,7 @@ export default function App() {
                   onChange={e => setCtx(e.target.value)}
                 >
                   <MenuItem value=""><em>Select context</em></MenuItem>
-                  {contexts.map(c => <MenuItem key={c.name} value={c.name}>{c.name} ({c.namespace})</MenuItem>)}
+                  {contextOptions.map(c => <MenuItem key={c.name} value={c.name}>{c.name} ({c.namespace})</MenuItem>)}
                 </Select>
               </FormControl>
               <FormControl size="small" fullWidth>

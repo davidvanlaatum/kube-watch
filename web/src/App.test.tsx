@@ -69,6 +69,7 @@ async function chooseOption(user: ReturnType<typeof userEvent.setup>, control: H
 
 describe('App', () => {
   beforeEach(() => {
+    window.history.replaceState(null, '', '/')
     MockEventSource.instances = []
     writeTextMock = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('EventSource', MockEventSource)
@@ -105,6 +106,48 @@ describe('App', () => {
     cleanup()
     vi.useRealTimers()
     vi.unstubAllGlobals()
+  })
+
+  it('restores context and resource from the URL route', async () => {
+    window.history.replaceState(null, '', '/view/dev/events')
+    render(<App />)
+
+    expect(await screen.findByText('v1.0.0')).toBeInTheDocument()
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    expect(MockEventSource.instances[0].url).toBe('/sse/dev/events')
+    expect(screen.getByRole('combobox', { name: 'Context' })).toHaveTextContent('dev')
+    expect(screen.getByRole('combobox', { name: 'Resource' })).toHaveTextContent('events')
+  })
+
+  it('updates the URL route when context and resource change', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect, resourceSelect] = await screen.findAllByRole('combobox')
+    await chooseOption(user, contextSelect, /dev/)
+    expect(window.location.pathname).toBe('/view/dev/pods')
+
+    await chooseOption(user, resourceSelect, 'events')
+    expect(window.location.pathname).toBe('/view/dev/events')
+  })
+
+  it('restores previous context and resource when navigating browser history', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect, resourceSelect] = await screen.findAllByRole('combobox')
+    await chooseOption(user, contextSelect, /dev/)
+    await chooseOption(user, resourceSelect, 'events')
+    expect(window.location.pathname).toBe('/view/dev/events')
+
+    window.history.back()
+    window.dispatchEvent(new PopStateEvent('popstate'))
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/view/dev/pods')
+    })
+    expect(screen.getByRole('combobox', { name: 'Resource' })).toHaveTextContent('pods')
   })
 
   it('renders pod rows with restart age and copy feedback', async () => {
