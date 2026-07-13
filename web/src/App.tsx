@@ -263,7 +263,9 @@ function podRestarts(o: any, now: number) {
     .at(-1)
   if (!lastRestartTime) return restarts
 
-  return `${restarts} (${formatDurationSince(lastRestartTime, now)} ago)`
+  const restartAge = relativeDurationSince(lastRestartTime, now)
+  if (!restartAge) return restarts
+  return <span title={formatLocalTimestamp(lastRestartTime) || undefined}>{restarts} ({restartAge} ago)</span>
 }
 
 function podStatuses(o: any) {
@@ -437,10 +439,23 @@ function metricTargetValue(target?: any) {
 }
 
 function formatDurationSince(timestamp: string | undefined, now = Date.now()) {
+  const duration = relativeDurationSince(timestamp, now)
+  if (!duration) return ''
+  return <span title={formatLocalTimestamp(timestamp) || undefined}>{duration}</span>
+}
+
+function relativeDurationSince(timestamp: string | undefined, now = Date.now()) {
   if (!timestamp) return ''
   const timestampMillis = new Date(timestamp).getTime()
   if (!Number.isFinite(timestampMillis)) return ''
   return formatMillis(Math.max(0, now - timestampMillis))
+}
+
+function formatLocalTimestamp(timestamp: string | undefined) {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString()
 }
 
 function formatDurationBetween(start: string, end: string) {

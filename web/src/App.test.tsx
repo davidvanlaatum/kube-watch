@@ -142,7 +142,14 @@ describe('App', () => {
     MockEventSource.instances[0].emit({ type: 'SYNCED' })
 
     const row = await screen.findByRole('row', { name: /api-7d9f/ })
-    expect(within(row).getByText('2 (5m ago)')).toBeInTheDocument()
+    expect(within(row).getByText('2 (5m ago)')).toHaveAttribute(
+      'title',
+      new Date('2026-07-07T23:55:00Z').toLocaleString(),
+    )
+    expect(within(row).getByText('1h')).toHaveAttribute(
+      'title',
+      new Date('2026-07-07T23:00:00Z').toLocaleString(),
+    )
 
     await vi.advanceTimersByTimeAsync(60_000)
     expect(within(row).getByText('2 (6m ago)')).toBeInTheDocument()
@@ -270,7 +277,10 @@ describe('App', () => {
     eventsStream.emit({ type: 'SYNCED' })
 
     const row = await screen.findByRole('row', { name: /Started container api/ })
-    expect(within(row).getByText('0s')).toBeInTheDocument()
+    expect(within(row).getByText('0s')).toHaveAttribute(
+      'title',
+      new Date('2026-07-08T00:00:01Z').toLocaleString(),
+    )
   })
 
   it('hides status filter for resources without status semantics', async () => {
