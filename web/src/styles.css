@@ -80,7 +80,6 @@ header h1 { margin: 0; font-size: 18px }
   font-weight: 600;
 }
 main { padding: 12px }
-main.has-details { padding-bottom: 42vh }
 .resource-table { overflow: auto }
 .name-cell {
   display: inline-flex;

@@ -721,8 +721,10 @@ export default function App() {
   const eventsEsRef = useRef<EventSource | null>(null)
   const logsEsRef = useRef<EventSource | null>(null)
   const logDetailsRef = useRef<HTMLDivElement | null>(null)
+  const detailsPanelRef = useRef<HTMLDivElement | null>(null)
   const routeSyncReadyRef = useRef(false)
   const handlingPopStateRef = useRef(false)
+  const [detailsOffset, setDetailsOffset] = useState(0)
 
   useEffect(() => {
     const onPopState = () => {
@@ -874,6 +876,28 @@ export default function App() {
         return a.seq - b.seq
       })
   }, [logEntries, activeLogContainer])
+
+  useEffect(() => {
+    if (!selectedItem || !detailsPanelRef.current) {
+      setDetailsOffset(0)
+      return
+    }
+
+    const updateDetailsOffset = () => {
+      const height = detailsPanelRef.current?.getBoundingClientRect().height || 0
+      setDetailsOffset(Math.ceil(height + 24))
+    }
+    updateDetailsOffset()
+
+    if (typeof ResizeObserver === 'function') {
+      const observer = new ResizeObserver(updateDetailsOffset)
+      observer.observe(detailsPanelRef.current)
+      return () => observer.disconnect()
+    }
+
+    window.addEventListener('resize', updateDetailsOffset)
+    return () => window.removeEventListener('resize', updateDetailsOffset)
+  }, [selectedItem, detailsTab, showFullDetails, helmHistory.length, helmHistoryLoading, logEntries.length, sortedSelectedEvents.length])
 
   useEffect(() => {
     if (!showStatusFilter && filters.status) {
@@ -1126,7 +1150,7 @@ export default function App() {
             </Stack>
           </Toolbar>
         </AppBar>
-        <Box component="main" className={selectedItem ? 'has-details' : undefined} sx={{ p: 2 }}>
+        <Box component="main" className={selectedItem ? 'has-details' : undefined} sx={{ p: 2, pb: selectedItem ? `${detailsOffset + 16}px` : 2 }}>
           {isLoading && (
             <Alert icon={<CircularProgress size={16} />} severity="info" role="status" sx={{ mb: 2 }}>
               Loading {resource}...
@@ -1217,7 +1241,7 @@ export default function App() {
             component={Paper}
             variant="outlined"
             className="resource-table"
-            sx={{ maxHeight: selectedItem ? '42vh' : 'calc(100vh - 190px)' }}
+            sx={{ maxHeight: selectedItem ? `max(180px, calc(100vh - 190px - ${detailsOffset}px))` : 'calc(100vh - 190px)' }}
           >
             <Table size="small" stickyHeader>
               <TableHead>
@@ -1274,6 +1298,7 @@ export default function App() {
             variant="persistent"
             slotProps={{
               paper: {
+                ref: detailsPanelRef,
                 className: 'details-panel',
                 sx: {
                   right: 12,
