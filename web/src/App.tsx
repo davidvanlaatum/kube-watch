@@ -50,6 +50,8 @@ type VersionInfo = {
   checkError?: string
 }
 type Envelope = { type?: string; object?: any; error?: string; info?: string }
+type BackendLogEnvelope = { type?: string; error?: string; info?: string; log?: { time?: string; message?: string; attrs?: Record<string, string> } }
+type BackendLogEntry = { id: string; message: string; time: string; count: number }
 type LogEnvelope = { type?: string; pod?: string; container?: string; timestamp?: string; line?: string; error?: string; info?: string; seq?: number }
 type LogEntry = { pod: string; container: string; timestamp: string; line: string; seq: number }
 type DetailsTab = 'yaml' | 'events' | 'logs' | 'history'
@@ -108,6 +110,8 @@ const theme = createTheme({
     },
   },
 })
+
+const backendLogDisplayMillis = 12_000
 
 const eventSupportedResources = new Set([
   'pods',
@@ -717,7 +721,10 @@ export default function App() {
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [backendLogs, setBackendLogs] = useState<BackendLogEntry[]>([])
   const esRef = useRef<EventSource | null>(null)
+  const backendLogsEsRef = useRef<EventSource | null>(null)
+  const backendLogTimersRef = useRef<Map<string, number>>(new Map())
   const eventsEsRef = useRef<EventSource | null>(null)
   const logsEsRef = useRef<EventSource | null>(null)
   const logDetailsRef = useRef<HTMLDivElement | null>(null)
@@ -767,6 +774,61 @@ export default function App() {
     const id = window.setInterval(() => setNow(Date.now()), 30_000)
     return () => window.clearInterval(id)
   }, [])
+
+  useEffect(() => {
+    const es = new EventSource('/api/backend-logs')
+    es.onmessage = (ev) => {
+      try {
+        const env: BackendLogEnvelope = JSON.parse(ev.data)
+        if (env.type !== 'BACKEND_LOG' || !env.error) return
+        const message = env.error
+        const time = env.log?.time || new Date().toISOString()
+        const id = message
+        setBackendLogs(prev => {
+          const existing = prev.find(entry => entry.id === id)
+          if (existing) {
+            return [
+              { ...existing, time, count: existing.count + 1 },
+              ...prev.filter(entry => entry.id !== id),
+            ].slice(0, 5)
+          }
+          return [{ id, message, time, count: 1 }, ...prev].slice(0, 5)
+        })
+        const existingTimer = backendLogTimersRef.current.get(id)
+        if (existingTimer !== undefined) {
+          window.clearTimeout(existingTimer)
+        }
+        const timer = window.setTimeout(() => {
+          setBackendLogs(prev => prev.filter(entry => entry.id !== id))
+          backendLogTimersRef.current.delete(id)
+        }, backendLogDisplayMillis)
+        backendLogTimersRef.current.set(id, timer)
+      } catch (error) {
+        console.warn('backend log stream parse', error)
+      }
+    }
+    es.onerror = (error) => {
+      console.warn('backend log stream error', error)
+    }
+    backendLogsEsRef.current = es
+    return () => {
+      es.close()
+      backendLogsEsRef.current = null
+      for (const timer of backendLogTimersRef.current.values()) {
+        window.clearTimeout(timer)
+      }
+      backendLogTimersRef.current.clear()
+    }
+  }, [])
+
+  const dismissBackendLog = (id: string) => {
+    const timer = backendLogTimersRef.current.get(id)
+    if (timer !== undefined) {
+      window.clearTimeout(timer)
+      backendLogTimersRef.current.delete(id)
+    }
+    setBackendLogs(prev => prev.filter(entry => entry.id !== id))
+  }
 
   useEffect(() => {
     if (!ctx) return
@@ -1155,6 +1217,33 @@ export default function App() {
             <Alert icon={<CircularProgress size={16} />} severity="info" role="status" sx={{ mb: 2 }}>
               Loading {resource}...
             </Alert>
+          )}
+          {backendLogs.length > 0 && (
+            <Stack
+              spacing={1}
+              role="status"
+              aria-live="polite"
+              sx={{
+                position: 'fixed',
+                top: 16,
+                right: 16,
+                zIndex: theme.zIndex.snackbar,
+                maxWidth: 560,
+                width: 'min(560px, calc(100vw - 32px))',
+              }}
+            >
+              {backendLogs.map(entry => (
+                <Alert
+                  key={entry.id}
+                  severity="error"
+                  variant="filled"
+                  elevation={6}
+                  onClose={() => dismissBackendLog(entry.id)}
+                >
+                  {entry.message}{entry.count > 1 ? ` (${entry.count}x)` : ''}
+                </Alert>
+              ))}
+            </Stack>
           )}
           {loadError && !isLoading && <Alert severity="error" sx={{ mb: 2 }}>{loadError}</Alert>}
           <Paper component="section" aria-label="Table filters" variant="outlined" sx={{ mb: 2, p: 1.5 }}>

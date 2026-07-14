@@ -28,6 +28,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api"
 )
 
+var backendLogHub = newBrowserLogHub()
+
 //go:embed web/dist
 var embeddedDist embed.FS
 
@@ -49,6 +51,11 @@ var supportedResources = map[string]schema.GroupVersionResource{
 }
 
 func main() {
+	slog.SetDefault(slog.New(&browserLogHandler{
+		next: slog.NewTextHandler(os.Stderr, nil),
+		hub:  backendLogHub,
+	}))
+
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "selfupdate", "self-update":
@@ -128,6 +135,10 @@ func main() {
 		json.NewEncoder(w).Encode(vc.Check(r.Context()))
 	})
 
+	mux.HandleFunc("/api/backend-logs", func(w http.ResponseWriter, r *http.Request) {
+		streamBackendLogs(w, r)
+	})
+
 	mux.HandleFunc("/api/helm-history/", func(w http.ResponseWriter, r *http.Request) {
 		// URL format: /api/helm-history/{context}/{driver}/{name}
 		parts := escapedPathSegments(r, "/api/helm-history/")
@@ -179,7 +190,7 @@ func main() {
 		if resource == helmReleasesResource {
 			ch, unsub, err := hm.Subscribe(ctxName)
 			if err != nil {
-				http.Error(w, fmt.Sprintf("subscribe failed: %v", err), http.StatusInternalServerError)
+				streamSSEError(w, "subscribe failed", err)
 				return
 			}
 			defer unsub()
@@ -194,7 +205,7 @@ func main() {
 		gvr := supportedResources[resource]
 		ch, unsub, err := wm.Subscribe(ctxName, gvr)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("subscribe failed: %v", err), http.StatusInternalServerError)
+			streamSSEError(w, "subscribe failed", err)
 			return
 		}
 		defer unsub()
@@ -236,7 +247,7 @@ func main() {
 		tailLines := parseTailLines(r.URL.Query().Get("tailLines"))
 		ch, unsub, err := lm.Subscribe(ctxName, resource, namespace, name, tailLines)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("subscribe logs failed: %v", err), http.StatusInternalServerError)
+			streamSSEError(w, "subscribe logs failed", err)
 			return
 		}
 		defer unsub()
@@ -352,6 +363,47 @@ func streamSSE(w http.ResponseWriter, r *http.Request, ch <-chan []byte) {
 			flusher.Flush()
 		}
 	}
+}
+
+func streamBackendLogs(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	fmt.Fprintf(w, "data: %s\n\n", []byte("{\"info\":\"connected\"}"))
+	flusher.Flush()
+
+	logCh, unsubscribe := backendLogHub.subscribe()
+	defer unsubscribe()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case b := <-logCh:
+			fmt.Fprintf(w, "data: %s\n\n", b)
+			flusher.Flush()
+		}
+	}
+}
+
+func streamSSEError(w http.ResponseWriter, prefix string, err error) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, fmt.Sprintf("%s: %v", prefix, err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	fmt.Fprintf(w, "data: %s\n\n", errorEvent(prefix, err))
+	flusher.Flush()
 }
 
 func urlPathSegment(segment string) (string, error) {

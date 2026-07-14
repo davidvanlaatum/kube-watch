@@ -106,6 +106,13 @@ test.beforeEach(async ({ page }) => {
     })
   })
 
+  await page.route('**/api/backend-logs', async route => {
+    await route.fulfill({
+      contentType: 'text/event-stream',
+      body: `data: ${JSON.stringify({ info: 'connected' })}\n\n`,
+    })
+  })
+
   await page.route('**/sse/dev/pods', async route => {
     await route.fulfill({
       contentType: 'text/event-stream',

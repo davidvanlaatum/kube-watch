@@ -5,13 +5,18 @@ import App from './App'
 
 class MockEventSource {
   static instances: MockEventSource[] = []
+  static backendLogInstances: MockEventSource[] = []
 
   onmessage: ((event: MessageEvent<string>) => void) | null = null
   onerror: ((event: Event) => void) | null = null
   closed = false
 
   constructor(readonly url: string) {
-    MockEventSource.instances.push(this)
+    if (url === '/api/backend-logs') {
+      MockEventSource.backendLogInstances.push(this)
+    } else {
+      MockEventSource.instances.push(this)
+    }
   }
 
   close() {
@@ -121,6 +126,7 @@ describe('App', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/')
     MockEventSource.instances = []
+    MockEventSource.backendLogInstances = []
     writeTextMock = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('EventSource', MockEventSource)
     fetchMock = vi.fn((input: RequestInfo | URL) => {
@@ -197,6 +203,38 @@ describe('App', () => {
     await user.click(screen.getByRole('tab', { name: 'History' }))
     expect(await screen.findByText('Install complete')).toBeInTheDocument()
     expect(screen.getByText('Upgrade complete')).toBeInTheDocument()
+  })
+
+  it('shows backend error logs from a single app-level stream', async () => {
+    render(<App />)
+
+    await waitFor(() => expect(MockEventSource.backendLogInstances).toHaveLength(1))
+    const backendLogStream = MockEventSource.backendLogInstances[0]
+    const authError = {
+      type: 'BACKEND_LOG',
+      error: 'Backend error: failed to build cluster config error=gcloud token expired',
+      log: {
+        time: '2026-07-08T00:00:00Z',
+        message: 'failed to build cluster config',
+      },
+    }
+    backendLogStream.emit(authError)
+
+    expect(await screen.findByText('Backend error: failed to build cluster config error=gcloud token expired')).toBeInTheDocument()
+    await vi.advanceTimersByTimeAsync(6_000)
+    backendLogStream.emit({
+      ...authError,
+      log: {
+        time: '2026-07-08T00:00:06Z',
+        message: 'failed to build cluster config',
+      },
+    })
+
+    expect(await screen.findByText('Backend error: failed to build cluster config error=gcloud token expired (2x)')).toBeInTheDocument()
+    await vi.advanceTimersByTimeAsync(12_000)
+    await waitFor(() => {
+      expect(screen.queryByText(/gcloud token expired/)).not.toBeInTheDocument()
+    })
   })
 
   it('updates the URL route when context and resource change', async () => {
