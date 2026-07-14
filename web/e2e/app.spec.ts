@@ -23,6 +23,51 @@ const pod = {
   },
 }
 
+const helmRelease = {
+  apiVersion: 'helm.sh/v3',
+  kind: 'HelmRelease',
+  metadata: {
+    uid: 'helmrelease:default:api',
+    name: 'api',
+    namespace: 'default',
+    creationTimestamp: '2026-07-07T23:00:00Z',
+    labels: { status: 'deployed' },
+  },
+  spec: {
+    chart: 'api',
+    version: '1.2.3',
+    appVersion: '4.5.6',
+  },
+  status: {
+    status: 'deployed',
+    revision: 2,
+    updated: '2026-07-07T23:55:00Z',
+    description: 'Upgrade complete',
+    storageDriver: 'secrets',
+  },
+}
+
+const helmHistory = [
+  {
+    revision: 1,
+    status: 'superseded',
+    updated: '2026-07-07T23:00:00Z',
+    chart: 'api',
+    version: '1.2.2',
+    appVersion: '4.5.5',
+    description: 'Install complete',
+  },
+  {
+    revision: 2,
+    status: 'deployed',
+    updated: '2026-07-07T23:55:00Z',
+    chart: 'api',
+    version: '1.2.3',
+    appVersion: '4.5.6',
+    description: 'Upgrade complete',
+  },
+]
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'clipboard', {
@@ -51,6 +96,13 @@ test.beforeEach(async ({ page }) => {
         latestUrl: 'https://github.com/davidvanlaatum/kube-watch/releases/tag/v1.1.0',
         updateAvailable: true,
       }),
+    })
+  })
+
+  await page.route('**/api/helm-history/dev/secrets/api', async route => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(helmHistory),
     })
   })
 
@@ -94,6 +146,18 @@ test.beforeEach(async ({ page }) => {
         '',
       ].join('\n\n'),
     })
+
+  })
+
+  await page.route('**/sse/dev/helmreleases', async route => {
+    await route.fulfill({
+      contentType: 'text/event-stream',
+      body: [
+        `data: ${JSON.stringify({ type: 'ADDED', object: helmRelease })}`,
+        `data: ${JSON.stringify({ type: 'SYNCED' })}`,
+        '',
+      ].join('\n\n'),
+    })
   })
 
   await page.route('**/logs/dev/pods/default/api-7d9f?tailLines=200', async route => {
@@ -110,6 +174,20 @@ test.beforeEach(async ({ page }) => {
       body: [...logEvents, ''].join('\n\n'),
     })
   })
+})
+
+test('renders Helm release table and history drawer', async ({ page }) => {
+  await page.goto('/view/dev/helmreleases')
+
+  const row = page.getByRole('row', { name: /api/ })
+  await expect(row).toContainText('deployed')
+  await expect(row).toContainText('api-1.2.3')
+  await expect(row).toContainText('4.5.6')
+  await row.click()
+  await page.getByRole('tab', { name: 'History' }).click()
+
+  await expect(page.getByText('Install complete')).toBeVisible()
+  await expect(page.getByText('Upgrade complete')).toBeVisible()
 })
 
 test('renders pod table, copy feedback, YAML details, events, and logs tab', async ({ page }) => {

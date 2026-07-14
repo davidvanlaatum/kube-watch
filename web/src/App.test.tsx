@@ -61,6 +61,56 @@ function podEvent(uid: string, name: string, options: {
   }
 }
 
+function helmReleaseEvent(name: string) {
+  return {
+    type: 'ADDED',
+    object: {
+      apiVersion: 'helm.sh/v3',
+      kind: 'HelmRelease',
+      metadata: {
+        uid: `helmrelease:default:${name}`,
+        name,
+        namespace: 'default',
+        creationTimestamp: '2026-07-07T23:00:00Z',
+        labels: { status: 'deployed' },
+      },
+      spec: {
+        chart: 'api',
+        version: '1.2.3',
+        appVersion: '4.5.6',
+      },
+      status: {
+        status: 'deployed',
+        revision: 2,
+        updated: '2026-07-07T23:55:00Z',
+        description: 'Upgrade complete',
+        storageDriver: 'secrets',
+      },
+    },
+  }
+}
+
+const helmHistoryResponse = [
+  {
+    revision: 1,
+    status: 'superseded',
+    updated: '2026-07-07T23:00:00Z',
+    chart: 'api',
+    version: '1.2.2',
+    appVersion: '4.5.5',
+    description: 'Install complete',
+  },
+  {
+    revision: 2,
+    status: 'deployed',
+    updated: '2026-07-07T23:55:00Z',
+    chart: 'api',
+    version: '1.2.3',
+    appVersion: '4.5.6',
+    description: 'Upgrade complete',
+  },
+]
+
 async function chooseOption(user: ReturnType<typeof userEvent.setup>, control: HTMLElement, optionName: string | RegExp) {
   await user.click(control)
   const listbox = await screen.findByRole('listbox')
@@ -87,7 +137,14 @@ describe('App', () => {
           }),
         })
       }
+      if (url === '/api/helm-history/dev/secrets/api') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(helmHistoryResponse),
+        })
+      }
       return Promise.resolve({
+        ok: true,
         json: () => Promise.resolve([{ name: 'dev', namespace: 'default' }]),
       })
     })
@@ -118,6 +175,28 @@ describe('App', () => {
     expect(MockEventSource.instances[0].url).toBe('/sse/dev/events')
     expect(screen.getByRole('combobox', { name: 'Context' })).toHaveTextContent('dev')
     expect(screen.getByRole('combobox', { name: 'Resource' })).toHaveTextContent('events')
+  })
+
+  it('renders Helm releases with history details', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    window.history.replaceState(null, '', '/view/dev/helmreleases')
+    render(<App />)
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    expect(MockEventSource.instances[0].url).toBe('/sse/dev/helmreleases')
+    MockEventSource.instances[0].emit(helmReleaseEvent('api'))
+    MockEventSource.instances[0].emit({ type: 'SYNCED' })
+
+    const row = await screen.findByRole('row', { name: /api/ })
+    expect(row).toHaveTextContent('deployed')
+    expect(row).toHaveTextContent('api-1.2.3')
+    expect(row).toHaveTextContent('4.5.6')
+    expect(row).toHaveTextContent('2')
+
+    await user.click(row)
+    await user.click(screen.getByRole('tab', { name: 'History' }))
+    expect(await screen.findByText('Install complete')).toBeInTheDocument()
+    expect(screen.getByText('Upgrade complete')).toBeInTheDocument()
   })
 
   it('updates the URL route when context and resource change', async () => {

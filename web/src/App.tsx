@@ -52,7 +52,7 @@ type VersionInfo = {
 type Envelope = { type?: string; object?: any; error?: string; info?: string }
 type LogEnvelope = { type?: string; pod?: string; container?: string; timestamp?: string; line?: string; error?: string; info?: string; seq?: number }
 type LogEntry = { pod: string; container: string; timestamp: string; line: string; seq: number }
-type DetailsTab = 'yaml' | 'events' | 'logs'
+type DetailsTab = 'yaml' | 'events' | 'logs' | 'history'
 type TableFilters = {
   name: string
   status: string
@@ -125,7 +125,7 @@ const eventSupportedResources = new Set([
   'networkpolicies',
 ])
 const logSupportedResources = new Set(['pods', 'deployments'])
-const statusFilterResources = new Set(['pods', 'deployments', 'statefulsets', 'jobs', 'events'])
+const statusFilterResources = new Set(['pods', 'deployments', 'statefulsets', 'jobs', 'events', 'helmreleases'])
 const defaultResource = 'pods'
 const resourceKinds: Record<string, string> = {
   pods: 'Pod',
@@ -141,6 +141,7 @@ const resourceKinds: Record<string, string> = {
   serviceaccounts: 'ServiceAccount',
   poddisruptionbudgets: 'PodDisruptionBudget',
   networkpolicies: 'NetworkPolicy',
+  helmreleases: 'HelmRelease',
 }
 
 const columnsByResource: Record<string, Column[]> = {
@@ -239,6 +240,15 @@ const columnsByResource: Record<string, Column[]> = {
     { header: 'OBJECT', value: eventObject },
     { header: 'MESSAGE', value: (o) => o.message || '' },
   ],
+  helmreleases: [
+    { header: 'NAME', value: name },
+    { header: 'NAMESPACE', value: (o) => o.metadata?.namespace || '' },
+    { header: 'STATUS', value: helmStatus },
+    { header: 'CHART', value: (o) => [o.spec?.chart, o.spec?.version].filter(Boolean).join('-') },
+    { header: 'APP VERSION', value: (o) => o.spec?.appVersion || '' },
+    { header: 'REVISION', value: (o) => o.status?.revision ?? 0, align: 'right' },
+    { header: 'UPDATED', value: helmUpdated, align: 'right' },
+  ],
 }
 
 function name(o: any) {
@@ -323,6 +333,7 @@ function resourceStatus(resource: string, object: any) {
   if (resource === 'pods') return podStatus(object)
   if (resource === 'jobs') return jobStatus(object)
   if (resource === 'events') return object.type || ''
+  if (resource === 'helmreleases') return helmStatus(object)
   if (resource === 'deployments' || resource === 'statefulsets') {
     return isReady(resource, object) ? 'Ready' : 'NotReady'
   }
@@ -420,6 +431,7 @@ function statusSuggestions(resource: string, objects: any[]) {
     statefulsets: ['Ready', 'NotReady'],
     jobs: ['Running', 'Complete', 'Failed'],
     events: ['Normal', 'Warning'],
+    helmreleases: ['deployed', 'failed', 'pending-install', 'pending-upgrade', 'pending-rollback', 'uninstalled', 'uninstalling', 'superseded'],
   }
   const suggestions = new Set(common[resource] || [])
   for (const object of objects) {
@@ -482,6 +494,14 @@ function jobStatus(o: any) {
   if (o.status?.failed) return 'Failed'
   if (o.status?.active) return 'Running'
   return ''
+}
+
+function helmStatus(o: any) {
+  return o.status?.status || ''
+}
+
+function helmUpdated(o: any, now: number) {
+  return formatDurationSince(o.status?.updated, now)
 }
 
 function hpaReference(o: any) {
@@ -686,6 +706,9 @@ export default function App() {
   const [selectedEvents, setSelectedEvents] = useState<Map<string, any>>(new Map())
   const [eventsLoading, setEventsLoading] = useState(false)
   const [eventsError, setEventsError] = useState<string | null>(null)
+  const [helmHistory, setHelmHistory] = useState<any[]>([])
+  const [helmHistoryLoading, setHelmHistoryLoading] = useState(false)
+  const [helmHistoryError, setHelmHistoryError] = useState<string | null>(null)
   const [logEntries, setLogEntries] = useState<LogEntry[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
   const [logsError, setLogsError] = useState<string | null>(null)
@@ -757,6 +780,9 @@ export default function App() {
     setShowFullDetails(false)
     setLogEntries([])
     setLogsError(null)
+    setHelmHistory([])
+    setHelmHistoryError(null)
+    setHelmHistoryLoading(false)
     setActiveLogContainer('')
     setSort(null)
     setIsLoading(true)
@@ -788,6 +814,8 @@ export default function App() {
             if (prev === uid) {
               setShowFullDetails(false)
               setDetailsTab('yaml')
+              setHelmHistory([])
+              setHelmHistoryError(null)
               return null
             }
             return prev
@@ -827,6 +855,7 @@ export default function App() {
   const detailsItem = selectedItem && (showFullDetails ? selectedItem : cleanKubernetesObject(selectedItem))
   const supportsEvents = Boolean(selectedItem && eventSupportedResources.has(resource))
   const supportsLogs = Boolean(selectedItem && logSupportedResources.has(resource))
+  const supportsHistory = Boolean(selectedItem && resource === 'helmreleases')
   const sortedSelectedEvents = sortItems('events', [...selectedEvents.values()], null)
   const selectedName = selectedItem?.metadata?.name || ''
   const selectedNamespace = selectedItem?.metadata?.namespace || ''
@@ -851,6 +880,46 @@ export default function App() {
       setFilters(prev => ({ ...prev, status: '' }))
     }
   }, [filters.status, showStatusFilter])
+
+  useEffect(() => {
+    setHelmHistory([])
+    setHelmHistoryError(null)
+
+    if (!ctx || !selectedItem || resource !== 'helmreleases' || detailsTab !== 'history') {
+      setHelmHistoryLoading(false)
+      return
+    }
+
+    const driver = selectedItem.status?.storageDriver || 'secrets'
+    const releaseName = selectedItem.metadata?.name || ''
+    if (!releaseName) {
+      setHelmHistoryLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    setHelmHistoryLoading(true)
+    fetch(`/api/helm-history/${encodeURIComponent(ctx)}/${encodeURIComponent(driver)}/${encodeURIComponent(releaseName)}`, {
+      signal: controller.signal,
+    }).then(async response => {
+      if (!response.ok) {
+        throw new Error(await response.text() || `Helm history failed with ${response.status}`)
+      }
+      return response.json()
+    }).then(history => {
+      setHelmHistory(Array.isArray(history) ? history : [])
+      setHelmHistoryError(null)
+    }).catch(error => {
+      if (error.name === 'AbortError') return
+      setHelmHistoryError(error.message || String(error))
+    }).finally(() => {
+      if (!controller.signal.aborted) {
+        setHelmHistoryLoading(false)
+      }
+    })
+
+    return () => controller.abort()
+  }, [ctx, resource, selectedItem, detailsTab])
 
   useEffect(() => {
     if (eventsEsRef.current) {
@@ -1051,6 +1120,7 @@ export default function App() {
                   <MenuItem value="poddisruptionbudgets">poddisruptionbudgets</MenuItem>
                   <MenuItem value="networkpolicies">networkpolicies</MenuItem>
                   <MenuItem value="events">events</MenuItem>
+                  <MenuItem value="helmreleases">helmreleases</MenuItem>
                 </Select>
               </FormControl>
             </Stack>
@@ -1184,6 +1254,8 @@ export default function App() {
                           setDetailsTab('yaml')
                           setLogEntries([])
                           setLogsError(null)
+                          setHelmHistory([])
+                          setHelmHistoryError(null)
                           setActiveLogContainer('')
                         }
                         return next
@@ -1242,8 +1314,50 @@ export default function App() {
                 <Tab value="yaml" label="YAML" />
                 {supportsEvents && <Tab value="events" label="Events" />}
                 {supportsLogs && <Tab value="logs" label="Logs" />}
+                {supportsHistory && <Tab value="history" label="History" />}
               </Tabs>
               {detailsTab === 'yaml' && <pre>{stringify(detailsItem)}</pre>}
+              {detailsTab === 'history' && supportsHistory && (
+                <Box className="event-details">
+                  {helmHistoryLoading && (
+                    <Alert icon={<CircularProgress size={16} />} severity="info" className="inline-status">
+                      Loading history...
+                    </Alert>
+                  )}
+                  {helmHistoryError && <Alert severity="error" className="inline-error">{helmHistoryError}</Alert>}
+                  {!helmHistoryLoading && helmHistory.length === 0 && !helmHistoryError && (
+                    <Alert severity="info" className="empty-state">No history found for this release.</Alert>
+                  )}
+                  {helmHistory.length > 0 && (
+                    <TableContainer component={Paper} sx={{ border: 1, borderColor: 'divider', maxHeight: '28vh' }}>
+                      <Table size="small" stickyHeader>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell align="right">REVISION</TableCell>
+                            <TableCell>STATUS</TableCell>
+                            <TableCell>CHART</TableCell>
+                            <TableCell>APP VERSION</TableCell>
+                            <TableCell align="right">UPDATED</TableCell>
+                            <TableCell>DESCRIPTION</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {helmHistory.map((revision: any) => (
+                            <TableRow key={revision.revision}>
+                              <TableCell align="right">{revision.revision}</TableCell>
+                              <TableCell>{revision.status || ''}</TableCell>
+                              <TableCell>{[revision.chart, revision.version].filter(Boolean).join('-')}</TableCell>
+                              <TableCell>{revision.appVersion || ''}</TableCell>
+                              <TableCell align="right">{formatDurationSince(revision.updated, now)}</TableCell>
+                              <TableCell>{revision.description || ''}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+                </Box>
+              )}
               {detailsTab === 'events' && supportsEvents && (
                 <Box className="event-details">
                   {eventsLoading && (
@@ -1452,6 +1566,16 @@ function tableSortValue(resource: string, header: string, object: any): string |
       return eventObject(object)
     case 'MESSAGE':
       return object.message || ''
+    case 'NAMESPACE':
+      return object.metadata?.namespace || ''
+    case 'CHART':
+      return [object.spec?.chart, object.spec?.version].filter(Boolean).join('-')
+    case 'APP VERSION':
+      return object.spec?.appVersion || ''
+    case 'REVISION':
+      return object.status?.revision ?? 0
+    case 'UPDATED':
+      return timestampSortValue(object.status?.updated)
     default:
       return object.metadata?.name || ''
   }

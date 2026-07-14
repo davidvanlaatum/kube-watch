@@ -92,6 +92,7 @@ func main() {
 
 	// instantiate watch manager
 	wm := NewWatchManager(loadingRules)
+	hm := NewHelmManager(loadingRules)
 	lm := NewLogManager(loadingRules)
 	vc := newVersionChecker()
 
@@ -127,6 +128,37 @@ func main() {
 		json.NewEncoder(w).Encode(vc.Check(r.Context()))
 	})
 
+	mux.HandleFunc("/api/helm-history/", func(w http.ResponseWriter, r *http.Request) {
+		// URL format: /api/helm-history/{context}/{driver}/{name}
+		parts := escapedPathSegments(r, "/api/helm-history/")
+		if len(parts) < 3 {
+			http.Error(w, "expected /api/helm-history/{context}/{driver}/{name}", http.StatusBadRequest)
+			return
+		}
+		ctxName, err := urlPathValue(parts[0])
+		if err != nil {
+			http.Error(w, "invalid context", http.StatusBadRequest)
+			return
+		}
+		driver, err := urlPathSegment(parts[1])
+		if err != nil {
+			http.Error(w, "invalid driver", http.StatusBadRequest)
+			return
+		}
+		name, err := urlPathSegment(parts[2])
+		if err != nil {
+			http.Error(w, "invalid release name", http.StatusBadRequest)
+			return
+		}
+		history, err := hm.History(ctxName, name, driver)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("helm history failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(history)
+	})
+
 	mux.HandleFunc("/sse/", func(w http.ResponseWriter, r *http.Request) {
 		// URL format: /sse/{context}/{resource}
 		parts := escapedPathSegments(r, "/sse/")
@@ -144,6 +176,16 @@ func main() {
 			http.Error(w, "invalid resource", http.StatusBadRequest)
 			return
 		}
+		if resource == helmReleasesResource {
+			ch, unsub, err := hm.Subscribe(ctxName)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("subscribe failed: %v", err), http.StatusInternalServerError)
+				return
+			}
+			defer unsub()
+			streamSSE(w, r, ch)
+			return
+		}
 		if _, ok := supportedResources[resource]; !ok {
 			http.Error(w, "unsupported resource", http.StatusBadRequest)
 			return
@@ -157,32 +199,7 @@ func main() {
 		}
 		defer unsub()
 
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-
-		// send a short ping
-		fmt.Fprintf(w, "data: %s\n\n", []byte("{\"info\":\"connected\"}"))
-		flusher.Flush()
-
-		for {
-			select {
-			case <-r.Context().Done():
-				return
-			case b, ok := <-ch:
-				if !ok {
-					return
-				}
-				fmt.Fprintf(w, "data: %s\n\n", b)
-				flusher.Flush()
-			}
-		}
+		streamSSE(w, r, ch)
 	})
 
 	mux.HandleFunc("/logs/", func(w http.ResponseWriter, r *http.Request) {
@@ -307,6 +324,34 @@ func contextSummaries(contexts []map[string]string) []string {
 		summaries = append(summaries, fmt.Sprintf("%s namespace=%s", ctx["name"], ctx["namespace"]))
 	}
 	return summaries
+}
+
+func streamSSE(w http.ResponseWriter, r *http.Request, ch <-chan []byte) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	fmt.Fprintf(w, "data: %s\n\n", []byte("{\"info\":\"connected\"}"))
+	flusher.Flush()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case b, ok := <-ch:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "data: %s\n\n", b)
+			flusher.Flush()
+		}
+	}
 }
 
 func urlPathSegment(segment string) (string, error) {

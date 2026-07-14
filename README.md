@@ -4,6 +4,7 @@ Overview
 - Go backend: discovers kubeconfig contexts, opens watches to clusters/resources and exposes SSE endpoints over HTTPS (self-signed certs in ./certs).
 - Vite + React frontend: proxies /api, /sse, and /logs during development and is embedded into the Go binary from web/dist for production.
 - Pod and Deployment details include a Logs tab that tails all containers, defaults to the last 200 lines, and live-follows new log lines.
+- Helm releases are exposed as a read-only synthetic resource with release status, chart/app versions, revision, update time, and revision history in the details drawer.
 - Released binaries include build-time version metadata and the UI checks GitHub for newer releases.
 - Resource tables include client-side filters for name, status, labels, and resource-specific quick toggles such as pod restarts and readiness.
 
@@ -60,8 +61,9 @@ Release build:
 
 Notes & next steps
 - Current implementation is a prototype: watches use dynamic client and basic list-then-watch logic with in-memory resume.
-- It supports: pods, deployments, statefulsets, replicasets, services, jobs, cronjobs, horizontal pod autoscalers, configmaps, secrets, serviceaccounts, poddisruptionbudgets, networkpolicies, events.
+- It supports: pods, deployments, statefulsets, replicasets, services, jobs, cronjobs, horizontal pod autoscalers, configmaps, secrets, serviceaccounts, poddisruptionbudgets, networkpolicies, events, and read-only Helm releases.
 - Logs are supported for pods and deployments. Pod logs stream every container in the selected pod. Deployment logs watch all currently matching pods, start following new matching pods, stop following removed pods, and group output by container name with pod-name prefixes.
+- Helm releases are listed from the selected context's configured namespace only. The backend watches Helm-looking Secrets and ConfigMaps as invalidation signals, then refreshes with Helm's list/history actions. This supports the default Helm secrets storage driver and Helm configmap storage.
 - Improvements: add informer factories, backpressure, per-resource rate limiting, authentication fallback, UI filters, and optional persisted snapshots.
 
 Troubleshooting & operational notes
@@ -74,6 +76,8 @@ Troubleshooting & operational notes
 - Snapshot cache behavior: the backend maintains an in-memory snapshot per (context,resource,namespace). When a new browser client subscribes it immediately receives the last-known ADDED/MODIFIED objects (so refreshing the page repopulates state). The snapshot is memory-resident and lost when the server restarts.
 
 - Reconnect behavior: watches are namespaced (per-context default namespace) to match RBAC-limited users. The server attempts to resume using resourceVersion when possible and re-lists on 410/Expired. Forbidden list/watch failures are treated as terminal for that subscription and surfaced to the UI.
+
+- Helm RBAC: the Helm releases view needs list/watch permissions for Secrets and ConfigMaps in the configured namespace, plus read access compatible with Helm list/history for whichever Helm storage driver is in use. Missing Secret or ConfigMap permissions are surfaced in the UI and backend logs.
 
 - Log streaming: `/logs/{context}/{resource}/{namespace}/{name}?tailLines=200` streams Server-Sent Events for pod/deployment logs. The UI lets you change `tailLines` up to 5000 and keeps following live output.
 
