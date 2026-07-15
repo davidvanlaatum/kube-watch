@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { eventMatchesResource, objectKey, sortItems } from '../resources'
 import type { Envelope } from '../types'
 
@@ -7,6 +7,21 @@ export function useResourceEvents(ctx: string, resource: string, selectedItem: a
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
+  const selectedUid = selectedItem?.metadata?.uid || ''
+  const selectedName = selectedItem?.metadata?.name || ''
+  const selectedNamespace = selectedItem?.metadata?.namespace || ''
+  const selectedKind = selectedItem?.kind || ''
+  const selectedResource = useMemo(() => {
+    if (!selectedName && !selectedUid) return null
+    return {
+      kind: selectedKind,
+      metadata: {
+        uid: selectedUid,
+        name: selectedName,
+        namespace: selectedNamespace,
+      },
+    }
+  }, [selectedKind, selectedName, selectedNamespace, selectedUid])
 
   useEffect(() => {
     if (esRef.current) {
@@ -16,13 +31,12 @@ export function useResourceEvents(ctx: string, resource: string, selectedItem: a
     setEvents(new Map())
     setError(null)
 
-    if (!ctx || !selectedItem || !supportsEvents) {
+    if (!ctx || !selectedResource || !supportsEvents) {
       setLoading(false)
       return
     }
 
     setLoading(true)
-    const selected = selectedItem
     const es = new EventSource(`/sse/${encodeURIComponent(ctx)}/events`)
     const emptyEventsTimer = window.setTimeout(() => {
       setLoading(false)
@@ -33,6 +47,7 @@ export function useResourceEvents(ctx: string, resource: string, selectedItem: a
         if (env.type === 'SYNCED') {
           window.clearTimeout(emptyEventsTimer)
           setLoading(false)
+          setError(null)
           return
         }
         if (env.error) {
@@ -41,7 +56,7 @@ export function useResourceEvents(ctx: string, resource: string, selectedItem: a
           setError(env.error)
           return
         }
-        if (!env.object || !eventMatchesResource(env.object, selected, resource)) {
+        if (!env.object || !eventMatchesResource(env.object, selectedResource, resource)) {
           return
         }
         window.clearTimeout(emptyEventsTimer)
@@ -79,7 +94,7 @@ export function useResourceEvents(ctx: string, resource: string, selectedItem: a
       es.close()
       esRef.current = null
     }
-  }, [ctx, resource, selectedItem, supportsEvents])
+  }, [ctx, resource, selectedResource, supportsEvents])
 
   return {
     events,

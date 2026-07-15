@@ -5,19 +5,15 @@ export function useHelmHistory(ctx: string, resource: string, selectedItem: any,
   const [history, setHistory] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const releaseName = selectedItem?.metadata?.name || ''
+  const driver = selectedItem?.status?.storageDriver || 'secrets'
+  const revision = selectedItem?.status?.revision ?? ''
 
   useEffect(() => {
     setHistory([])
     setError(null)
 
-    if (!ctx || !selectedItem || resource !== 'helmreleases' || detailsTab !== 'history') {
-      setLoading(false)
-      return
-    }
-
-    const driver = selectedItem.status?.storageDriver || 'secrets'
-    const releaseName = selectedItem.metadata?.name || ''
-    if (!releaseName) {
+    if (!ctx || !releaseName || resource !== 'helmreleases' || detailsTab !== 'history') {
       setLoading(false)
       return
     }
@@ -44,7 +40,7 @@ export function useHelmHistory(ctx: string, resource: string, selectedItem: any,
     })
 
     return () => controller.abort()
-  }, [ctx, resource, selectedItem, detailsTab])
+  }, [ctx, resource, releaseName, driver, revision, detailsTab])
 
   return { history, loading, error }
 }

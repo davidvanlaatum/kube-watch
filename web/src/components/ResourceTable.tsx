@@ -19,7 +19,7 @@ type ResourceTableProps = {
   hasSelectedItem: boolean
   sort: SortState
   objectKey: (object: any) => string
-  nextSort: (current: SortState, header: string) => SortState
+  nextSort: (current: SortState, columnId: string) => SortState
   onSortChange: (updater: (sort: SortState) => SortState) => void
   onSelectKey: (updater: (key: string | null) => string | null) => void
   onSelectionChanged: () => void
@@ -50,13 +50,13 @@ export function ResourceTable({
         <TableHead>
           <TableRow>
             {columns.map(column => {
-              const active = sort?.header === column.header
+              const active = sort?.columnId === column.id
               return (
-                <TableCell key={column.header} align={column.align} sortDirection={active ? sort.direction : false}>
+                <TableCell key={column.id} align={column.align} sortDirection={active ? sort.direction : false}>
                   <TableSortLabel
                     active={active}
                     direction={active ? sort.direction : 'asc'}
-                    onClick={() => onSortChange(prev => nextSort(prev, column.header))}
+                    onClick={() => onSortChange(prev => nextSort(prev, column.id))}
                   >
                     {column.header}
                   </TableSortLabel>
@@ -82,7 +82,7 @@ export function ResourceTable({
                   return next
                 })}
               >
-                {columns.map(column => <TableCell key={column.header} align={column.align}>{column.value(item, now)}</TableCell>)}
+                {columns.map(column => <TableCell key={column.id} align={column.align}>{column.value(item, now)}</TableCell>)}
               </TableRow>
             )
           })}

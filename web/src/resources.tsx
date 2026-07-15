@@ -69,110 +69,119 @@ export const emptyFilters: TableFilters = {
   notReadyOnly: false,
 }
 
+function column(
+  id: string,
+  header: string,
+  value: Column['value'],
+  options: Pick<Column, 'align' | 'sortValue'> = {},
+): Column {
+  return { id, header, value, ...options }
+}
+
 export const columnsByResource: Record<string, Column[]> = {
   pods: [
-    { header: 'NAME', value: name },
-    { header: 'READY', value: podReady, align: 'center' },
-    { header: 'STATUS', value: podStatus },
-    { header: 'RESTARTS', value: podRestarts, align: 'right' },
-    { header: 'AGE', value: age, align: 'right' },
-    { header: 'NODE', value: (o) => o.spec?.nodeName || '<none>' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('ready', 'READY', podReady, { align: 'center', sortValue: podReadySortValue }),
+    column('status', 'STATUS', podStatus, { sortValue: podStatus }),
+    column('restarts', 'RESTARTS', podRestarts, { align: 'right', sortValue: podRestartCount }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
+    column('node', 'NODE', (o) => o.spec?.nodeName || '<none>', { sortValue: (o) => o.spec?.nodeName || '' }),
   ],
   deployments: [
-    { header: 'NAME', value: name },
-    { header: 'READY', value: (o) => `${o.status?.readyReplicas || 0}/${o.spec?.replicas ?? 0}`, align: 'center' },
-    { header: 'UP-TO-DATE', value: (o) => o.status?.updatedReplicas || 0, align: 'right' },
-    { header: 'AVAILABLE', value: (o) => o.status?.availableReplicas || 0, align: 'right' },
-    { header: 'AGE', value: age, align: 'right' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('ready', 'READY', (o) => `${o.status?.readyReplicas || 0}/${o.spec?.replicas ?? 0}`, { align: 'center', sortValue: readyReplicasSortValue }),
+    column('updated', 'UP-TO-DATE', (o) => o.status?.updatedReplicas || 0, { align: 'right', sortValue: (o) => o.status?.updatedReplicas || 0 }),
+    column('available', 'AVAILABLE', (o) => o.status?.availableReplicas || 0, { align: 'right', sortValue: (o) => o.status?.availableReplicas || 0 }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
   ],
   statefulsets: [
-    { header: 'NAME', value: name },
-    { header: 'READY', value: (o) => `${o.status?.readyReplicas || 0}/${o.spec?.replicas ?? 0}`, align: 'center' },
-    { header: 'AGE', value: age, align: 'right' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('ready', 'READY', (o) => `${o.status?.readyReplicas || 0}/${o.spec?.replicas ?? 0}`, { align: 'center', sortValue: readyReplicasSortValue }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
   ],
   replicasets: [
-    { header: 'NAME', value: name },
-    { header: 'DESIRED', value: (o) => o.spec?.replicas ?? 0, align: 'right' },
-    { header: 'CURRENT', value: (o) => o.status?.replicas ?? 0, align: 'right' },
-    { header: 'READY', value: (o) => o.status?.readyReplicas ?? 0, align: 'right' },
-    { header: 'AGE', value: age, align: 'right' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('desired', 'DESIRED', (o) => o.spec?.replicas ?? 0, { align: 'right', sortValue: (o) => o.spec?.replicas ?? 0 }),
+    column('current', 'CURRENT', (o) => o.status?.replicas ?? 0, { align: 'right', sortValue: (o) => o.status?.replicas ?? 0 }),
+    column('ready', 'READY', (o) => o.status?.readyReplicas ?? 0, { align: 'right', sortValue: readyReplicasSortValue }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
   ],
   services: [
-    { header: 'NAME', value: name },
-    { header: 'TYPE', value: (o) => o.spec?.type || '' },
-    { header: 'CLUSTER-IP', value: (o) => o.spec?.clusterIP || '<none>' },
-    { header: 'EXTERNAL-IP', value: serviceExternalIP },
-    { header: 'PORT(S)', value: servicePorts },
-    { header: 'AGE', value: age, align: 'right' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('type', 'TYPE', (o) => o.spec?.type || '', { sortValue: (o) => o.spec?.type || '' }),
+    column('clusterIp', 'CLUSTER-IP', (o) => o.spec?.clusterIP || '<none>', { sortValue: (o) => o.spec?.clusterIP || '' }),
+    column('externalIp', 'EXTERNAL-IP', serviceExternalIP, { sortValue: serviceExternalIP }),
+    column('ports', 'PORT(S)', servicePorts, { sortValue: servicePorts }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
   ],
   jobs: [
-    { header: 'NAME', value: name },
-    { header: 'STATUS', value: jobStatus },
-    { header: 'COMPLETIONS', value: (o) => `${o.status?.succeeded || 0}/${o.spec?.completions || 1}`, align: 'center' },
-    { header: 'DURATION', value: duration, align: 'right' },
-    { header: 'AGE', value: age, align: 'right' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('status', 'STATUS', jobStatus, { sortValue: jobStatus }),
+    column('completions', 'COMPLETIONS', (o) => `${o.status?.succeeded || 0}/${o.spec?.completions || 1}`, { align: 'center', sortValue: (o) => o.status?.succeeded || 0 }),
+    column('duration', 'DURATION', duration, { align: 'right', sortValue: durationSortValue }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
   ],
   cronjobs: [
-    { header: 'NAME', value: name },
-    { header: 'SCHEDULE', value: (o) => o.spec?.schedule || '' },
-    { header: 'TIMEZONE', value: (o) => o.spec?.timeZone || '<none>' },
-    { header: 'SUSPEND', value: (o) => String(Boolean(o.spec?.suspend)), align: 'center' },
-    { header: 'ACTIVE', value: (o) => o.status?.active?.length || 0, align: 'right' },
-    { header: 'LAST SCHEDULE', value: lastSchedule, align: 'right' },
-    { header: 'AGE', value: age, align: 'right' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('schedule', 'SCHEDULE', (o) => o.spec?.schedule || '', { sortValue: (o) => o.spec?.schedule || '' }),
+    column('timezone', 'TIMEZONE', (o) => o.spec?.timeZone || '<none>', { sortValue: (o) => o.spec?.timeZone || '' }),
+    column('suspend', 'SUSPEND', (o) => String(Boolean(o.spec?.suspend)), { align: 'center', sortValue: (o) => o.spec?.suspend ? 1 : 0 }),
+    column('active', 'ACTIVE', (o) => o.status?.active?.length || 0, { align: 'right', sortValue: (o) => o.status?.active?.length || 0 }),
+    column('lastSchedule', 'LAST SCHEDULE', lastSchedule, { align: 'right', sortValue: (o) => timestampSortValue(o.status?.lastScheduleTime) }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
   ],
   hpas: [
-    { header: 'NAME', value: name },
-    { header: 'REFERENCE', value: hpaReference },
-    { header: 'TARGETS', value: hpaTargets },
-    { header: 'MINPODS', value: (o) => o.spec?.minReplicas ?? 1, align: 'right' },
-    { header: 'MAXPODS', value: (o) => o.spec?.maxReplicas ?? '', align: 'right' },
-    { header: 'REPLICAS', value: (o) => o.status?.currentReplicas ?? 0, align: 'right' },
-    { header: 'AGE', value: age, align: 'right' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('reference', 'REFERENCE', hpaReference, { sortValue: hpaReference }),
+    column('targets', 'TARGETS', hpaTargets, { sortValue: hpaTargets }),
+    column('minPods', 'MINPODS', (o) => o.spec?.minReplicas ?? 1, { align: 'right', sortValue: (o) => o.spec?.minReplicas ?? 1 }),
+    column('maxPods', 'MAXPODS', (o) => o.spec?.maxReplicas ?? '', { align: 'right', sortValue: (o) => o.spec?.maxReplicas ?? 0 }),
+    column('replicas', 'REPLICAS', (o) => o.status?.currentReplicas ?? 0, { align: 'right', sortValue: (o) => o.status?.currentReplicas ?? 0 }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
   ],
   configmaps: [
-    { header: 'NAME', value: name },
-    { header: 'DATA', value: (o) => Object.keys(o.data || {}).length, align: 'right' },
-    { header: 'AGE', value: age, align: 'right' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('data', 'DATA', (o) => Object.keys(o.data || {}).length, { align: 'right', sortValue: dataKeyCount }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
   ],
   secrets: [
-    { header: 'NAME', value: name },
-    { header: 'TYPE', value: (o) => o.type || '' },
-    { header: 'DATA', value: (o) => Object.keys(o.data || {}).length, align: 'right' },
-    { header: 'AGE', value: age, align: 'right' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('type', 'TYPE', (o) => o.type || '', { sortValue: (o) => o.type || '' }),
+    column('data', 'DATA', (o) => Object.keys(o.data || {}).length, { align: 'right', sortValue: dataKeyCount }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
   ],
   serviceaccounts: [
-    { header: 'NAME', value: name },
-    { header: 'SECRETS', value: (o) => o.secrets?.length || 0, align: 'right' },
-    { header: 'AGE', value: age, align: 'right' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('secrets', 'SECRETS', (o) => o.secrets?.length || 0, { align: 'right', sortValue: (o) => o.secrets?.length || 0 }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
   ],
   poddisruptionbudgets: [
-    { header: 'NAME', value: name },
-    { header: 'MIN AVAILABLE', value: (o) => o.spec?.minAvailable ?? 'N/A', align: 'right' },
-    { header: 'MAX UNAVAILABLE', value: (o) => o.spec?.maxUnavailable ?? 'N/A', align: 'right' },
-    { header: 'ALLOWED DISRUPTIONS', value: (o) => o.status?.disruptionsAllowed ?? 0, align: 'right' },
-    { header: 'AGE', value: age, align: 'right' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('minAvailable', 'MIN AVAILABLE', (o) => o.spec?.minAvailable ?? 'N/A', { align: 'right', sortValue: (o) => String(o.spec?.minAvailable ?? '') }),
+    column('maxUnavailable', 'MAX UNAVAILABLE', (o) => o.spec?.maxUnavailable ?? 'N/A', { align: 'right', sortValue: (o) => String(o.spec?.maxUnavailable ?? '') }),
+    column('allowedDisruptions', 'ALLOWED DISRUPTIONS', (o) => o.status?.disruptionsAllowed ?? 0, { align: 'right', sortValue: (o) => o.status?.disruptionsAllowed ?? 0 }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
   ],
   networkpolicies: [
-    { header: 'NAME', value: name },
-    { header: 'POD-SELECTOR', value: (o) => labelSelector(o.spec?.podSelector) },
-    { header: 'AGE', value: age, align: 'right' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('podSelector', 'POD-SELECTOR', (o) => labelSelector(o.spec?.podSelector), { sortValue: (o) => labelSelector(o.spec?.podSelector) }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
   ],
   events: [
-    { header: 'LAST SEEN', value: eventLastSeen, align: 'right' },
-    { header: 'TYPE', value: (o) => o.type || '' },
-    { header: 'REASON', value: (o) => o.reason || '' },
-    { header: 'OBJECT', value: eventObject },
-    { header: 'MESSAGE', value: (o) => o.message || '' },
+    column('lastSeen', 'LAST SEEN', eventLastSeen, { align: 'right', sortValue: eventTimestamp }),
+    column('type', 'TYPE', (o) => o.type || '', { sortValue: (o) => o.type || '' }),
+    column('reason', 'REASON', (o) => o.reason || '', { sortValue: (o) => o.reason || '' }),
+    column('object', 'OBJECT', eventObject, { sortValue: eventObject }),
+    column('message', 'MESSAGE', (o) => o.message || '', { sortValue: (o) => o.message || '' }),
   ],
   helmreleases: [
-    { header: 'NAME', value: name },
-    { header: 'NAMESPACE', value: (o) => o.metadata?.namespace || '' },
-    { header: 'STATUS', value: helmStatus },
-    { header: 'CHART', value: (o) => [o.spec?.chart, o.spec?.version].filter(Boolean).join('-') },
-    { header: 'APP VERSION', value: (o) => o.spec?.appVersion || '' },
-    { header: 'REVISION', value: (o) => o.status?.revision ?? 0, align: 'right' },
-    { header: 'UPDATED', value: helmUpdated, align: 'right' },
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('namespace', 'NAMESPACE', (o) => o.metadata?.namespace || '', { sortValue: (o) => o.metadata?.namespace || '' }),
+    column('status', 'STATUS', helmStatus, { sortValue: helmStatus }),
+    column('chart', 'CHART', (o) => [o.spec?.chart, o.spec?.version].filter(Boolean).join('-'), { sortValue: (o) => [o.spec?.chart, o.spec?.version].filter(Boolean).join('-') }),
+    column('appVersion', 'APP VERSION', (o) => o.spec?.appVersion || '', { sortValue: (o) => o.spec?.appVersion || '' }),
+    column('revision', 'REVISION', (o) => o.status?.revision ?? 0, { align: 'right', sortValue: (o) => o.status?.revision ?? 0 }),
+    column('updated', 'UPDATED', helmUpdated, { align: 'right', sortValue: (o) => timestampSortValue(o.status?.updated) }),
   ],
 }
 
@@ -577,9 +586,10 @@ export function supportedResource(resource: string | undefined): resource is str
 
 export function sortItems(resource: string, values: any[], sort: SortState) {
   if (sort) {
+    const sortValue = columnsByResource[resource]?.find(column => column.id === sort.columnId)?.sortValue ?? nameSortValue
     return values.sort((a, b) => compareSortValues(
-      tableSortValue(resource, sort.header, a),
-      tableSortValue(resource, sort.header, b),
+      sortValue(a),
+      sortValue(b),
       sort.direction,
     ))
   }
@@ -589,9 +599,9 @@ export function sortItems(resource: string, values: any[], sort: SortState) {
   return values.sort((a, b) => (a.metadata?.name || '').localeCompare(b.metadata?.name || ''))
 }
 
-export function nextSort(current: SortState, header: string): SortState {
-  if (current?.header !== header) return { header, direction: 'asc' }
-  if (current.direction === 'asc') return { header, direction: 'desc' }
+export function nextSort(current: SortState, columnId: string): SortState {
+  if (current?.columnId !== columnId) return { columnId, direction: 'asc' }
+  if (current.direction === 'asc') return { columnId, direction: 'desc' }
   return null
 }
 
@@ -602,101 +612,25 @@ function compareSortValues(a: string | number, b: string | number, direction: So
   return direction === 'asc' ? result : -result
 }
 
-function tableSortValue(resource: string, header: string, object: any): string | number {
-  switch (header) {
-    case 'NAME':
-      return object.metadata?.name || ''
-    case 'READY':
-      return readySortValue(resource, object)
-    case 'STATUS':
-      return resourceStatus(resource, object)
-    case 'RESTARTS':
-      return podRestartCount(object)
-    case 'AGE':
-      return timestampSortValue(object.metadata?.creationTimestamp)
-    case 'NODE':
-      return object.spec?.nodeName || ''
-    case 'UP-TO-DATE':
-      return object.status?.updatedReplicas || 0
-    case 'AVAILABLE':
-      return object.status?.availableReplicas || 0
-    case 'DESIRED':
-      return object.spec?.replicas ?? 0
-    case 'CURRENT':
-      return object.status?.replicas ?? 0
-    case 'TYPE':
-      return object.spec?.type || object.type || ''
-    case 'CLUSTER-IP':
-      return object.spec?.clusterIP || ''
-    case 'EXTERNAL-IP':
-      return serviceExternalIP(object)
-    case 'PORT(S)':
-      return servicePorts(object)
-    case 'COMPLETIONS':
-      return object.status?.succeeded || 0
-    case 'DURATION':
-      return durationSortValue(object)
-    case 'SCHEDULE':
-      return object.spec?.schedule || ''
-    case 'TIMEZONE':
-      return object.spec?.timeZone || ''
-    case 'SUSPEND':
-      return object.spec?.suspend ? 1 : 0
-    case 'ACTIVE':
-      return object.status?.active?.length || 0
-    case 'LAST SCHEDULE':
-      return timestampSortValue(object.status?.lastScheduleTime)
-    case 'REFERENCE':
-      return hpaReference(object)
-    case 'TARGETS':
-      return hpaTargets(object)
-    case 'MINPODS':
-      return object.spec?.minReplicas ?? 1
-    case 'MAXPODS':
-      return object.spec?.maxReplicas ?? 0
-    case 'REPLICAS':
-      return object.status?.currentReplicas ?? 0
-    case 'DATA':
-      return Object.keys(object.data || {}).length
-    case 'SECRETS':
-      return object.secrets?.length || 0
-    case 'MIN AVAILABLE':
-      return String(object.spec?.minAvailable ?? '')
-    case 'MAX UNAVAILABLE':
-      return String(object.spec?.maxUnavailable ?? '')
-    case 'ALLOWED DISRUPTIONS':
-      return object.status?.disruptionsAllowed ?? 0
-    case 'POD-SELECTOR':
-      return labelSelector(object.spec?.podSelector)
-    case 'LAST SEEN':
-      return eventTimestamp(object)
-    case 'REASON':
-      return object.reason || ''
-    case 'OBJECT':
-      return eventObject(object)
-    case 'MESSAGE':
-      return object.message || ''
-    case 'NAMESPACE':
-      return object.metadata?.namespace || ''
-    case 'CHART':
-      return [object.spec?.chart, object.spec?.version].filter(Boolean).join('-')
-    case 'APP VERSION':
-      return object.spec?.appVersion || ''
-    case 'REVISION':
-      return object.status?.revision ?? 0
-    case 'UPDATED':
-      return timestampSortValue(object.status?.updated)
-    default:
-      return object.metadata?.name || ''
-  }
+function nameSortValue(object: any) {
+  return object.metadata?.name || ''
 }
 
-function readySortValue(resource: string, object: any) {
-  if (resource === 'pods') {
-    const statuses = object.status?.containerStatuses || []
-    return statuses.filter((status: any) => status.ready).length
-  }
+function creationTimestampSortValue(object: any) {
+  return timestampSortValue(object.metadata?.creationTimestamp)
+}
+
+function podReadySortValue(object: any) {
+  const statuses = object.status?.containerStatuses || []
+  return statuses.filter((status: any) => status.ready).length
+}
+
+function readyReplicasSortValue(object: any) {
   return object.status?.readyReplicas ?? 0
+}
+
+function dataKeyCount(object: any) {
+  return Object.keys(object.data || {}).length
 }
 
 function timestampSortValue(timestamp: string | undefined) {

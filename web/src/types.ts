@@ -47,6 +47,7 @@ export type TableFilters = {
 }
 
 export type Column = {
+  id: string
   header: string
   value: (object: any, now: number) => ReactNode
   align?: 'left' | 'center' | 'right'
@@ -54,6 +55,6 @@ export type Column = {
 }
 
 export type SortDirection = 'asc' | 'desc'
-export type SortState = { header: string; direction: SortDirection } | null
+export type SortState = { columnId: string; direction: SortDirection } | null
 
 export type ViewRoute = { ctx: string; resource: string }

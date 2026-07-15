@@ -79,6 +79,8 @@ Troubleshooting & operational notes
 
 - Helm RBAC: the Helm releases view needs list/watch permissions for Secrets and ConfigMaps in the configured namespace, plus read access compatible with Helm list/history for whichever Helm storage driver is in use. Missing Secret or ConfigMap permissions are surfaced in the UI and backend logs.
 
+- Secret visibility: kube-watch intentionally renders Kubernetes Secret objects, including `data` and `stringData`, in the details YAML for users whose current kubeconfig context is authorized to read them. This is part of the local/operator inspection use case. Treat the browser session as sensitive, do not share it broadly, and do not copy Secret contents into issues, logs, commits, or third-party systems.
+
 - Log streaming: `/logs/{context}/{resource}/{namespace}/{name}?tailLines=200` streams Server-Sent Events for pod/deployment logs. The UI lets you change `tailLines` up to 5000 and keeps following live output.
 
 - Self-update: on macOS/Linux, `kube-watch selfupdate` checks `https://github.com/davidvanlaatum/kube-watch/releases/latest`, selects the archive matching the current OS/architecture, verifies the SHA-256 checksum from the release, and swaps the running executable path. If installed in a protected directory, rerun with the permissions required to replace that file. Windows self-update is not supported; replace `kube-watch.exe` manually from the latest release archive.

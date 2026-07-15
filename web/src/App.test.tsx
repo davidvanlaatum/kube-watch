@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -26,6 +26,10 @@ class MockEventSource {
   emit(data: unknown) {
     this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent<string>)
   }
+
+  emitError() {
+    this.onerror?.(new Event('error'))
+  }
 }
 
 let writeTextMock: ReturnType<typeof vi.fn>
@@ -37,6 +41,7 @@ function podEvent(uid: string, name: string, options: {
   ready?: boolean
   restarts?: number
   lastRestart?: string
+  nodeName?: string
 } = {}) {
   const restarts = options.restarts ?? 0
   return {
@@ -51,7 +56,7 @@ function podEvent(uid: string, name: string, options: {
         creationTimestamp: '2026-07-07T23:00:00Z',
       },
       spec: {
-        nodeName: 'node-a',
+        nodeName: options.nodeName || 'node-a',
         containers: [{ name: 'api' }],
       },
       status: {
@@ -203,6 +208,25 @@ describe('App', () => {
     await user.click(screen.getByRole('tab', { name: 'History' }))
     expect(await screen.findByText('Install complete')).toBeInTheDocument()
     expect(screen.getByText('Upgrade complete')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.filter(call => call[0] === '/api/helm-history/dev/secrets/api')).toHaveLength(1)
+
+    const modified = helmReleaseEvent('api')
+    modified.type = 'MODIFIED'
+    modified.object.status.description = 'Status updated'
+    act(() => {
+      MockEventSource.instances[0].emit(modified)
+    })
+
+    expect(fetchMock.mock.calls.filter(call => call[0] === '/api/helm-history/dev/secrets/api')).toHaveLength(1)
+
+    modified.object.status.revision = 3
+    act(() => {
+      MockEventSource.instances[0].emit(modified)
+    })
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(call => call[0] === '/api/helm-history/dev/secrets/api')).toHaveLength(2)
+    })
   })
 
   it('shows backend error logs from a single app-level stream', async () => {
@@ -247,6 +271,28 @@ describe('App', () => {
 
     await chooseOption(user, resourceSelect, 'events')
     expect(window.location.pathname).toBe('/view/dev/events')
+  })
+
+  it('clears resource data and closes the stream when context is cleared', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect] = await screen.findAllByRole('combobox')
+    await chooseOption(user, contextSelect, /dev/)
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    const resourceStream = MockEventSource.instances[0]
+    resourceStream.emit(podEvent('pod-1', 'api-7d9f'))
+    resourceStream.emit({ type: 'SYNCED' })
+    expect(await screen.findByRole('row', { name: /api-7d9f/ })).toBeInTheDocument()
+
+    await chooseOption(user, contextSelect, 'Select context')
+
+    await waitFor(() => {
+      expect(screen.queryByRole('row', { name: /api-7d9f/ })).not.toBeInTheDocument()
+    })
+    expect(resourceStream.closed).toBe(true)
+    expect(window.location.pathname).toBe('/')
   })
 
   it('restores previous context and resource when navigating browser history', async () => {
@@ -385,6 +431,26 @@ describe('App', () => {
     await user.click(screen.getByLabelText('Not ready'))
     expect(screen.queryByRole('row', { name: /api-7d9f/ })).not.toBeInTheDocument()
     expect(screen.getByRole('row', { name: /worker-55f8/ })).toBeInTheDocument()
+  })
+
+  it('sorts by stable non-name column ids', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect] = await screen.findAllByRole('combobox')
+    await chooseOption(user, contextSelect, /dev/)
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    MockEventSource.instances[0].emit(podEvent('pod-alpha', 'alpha-api', { nodeName: 'node-z' }))
+    MockEventSource.instances[0].emit(podEvent('pod-zeta', 'zeta-api', { nodeName: 'node-a' }))
+    MockEventSource.instances[0].emit({ type: 'SYNCED' })
+    expect(await screen.findByRole('row', { name: /alpha-api/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /NODE/ }))
+
+    const rows = screen.getAllByRole('row').slice(1)
+    expect(rows[0]).toHaveTextContent('zeta-api')
+    expect(rows[0]).toHaveTextContent('node-a')
   })
 
   it('applies modified and deleted resource events', async () => {
@@ -540,6 +606,78 @@ describe('App', () => {
     expect(screen.getByText('namespaced initial list failed: forbidden')).toBeInTheDocument()
   })
 
+  it('clears selected event stream reconnect errors after recovery sync', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect] = await screen.findAllByRole('combobox')
+    await chooseOption(user, contextSelect, /dev/)
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    MockEventSource.instances[0].emit(podEvent('pod-1', 'api-7d9f'))
+    MockEventSource.instances[0].emit({ type: 'SYNCED' })
+    await user.click(await screen.findByRole('row', { name: /api-7d9f/ }))
+    await waitFor(() => expect(MockEventSource.instances.some(instance => instance.url === '/sse/dev/events')).toBe(true))
+    const eventStream = MockEventSource.instances.find(instance => instance.url === '/sse/dev/events')!
+
+    eventStream.emitError()
+    await user.click(screen.getByRole('tab', { name: 'Events' }))
+    expect(await screen.findByText('Event stream interrupted; waiting for EventSource to reconnect')).toBeInTheDocument()
+
+    eventStream.emit({ type: 'SYNCED' })
+
+    await waitFor(() => {
+      expect(screen.queryByText('Event stream interrupted; waiting for EventSource to reconnect')).not.toBeInTheDocument()
+    })
+  })
+
+  it('renders selected resource events in the details drawer', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect] = await screen.findAllByRole('combobox')
+    await chooseOption(user, contextSelect, /dev/)
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    MockEventSource.instances[0].emit(podEvent('pod-1', 'api-7d9f'))
+    MockEventSource.instances[0].emit({ type: 'SYNCED' })
+    await user.click(await screen.findByRole('row', { name: /api-7d9f/ }))
+    await waitFor(() => expect(MockEventSource.instances.some(instance => instance.url === '/sse/dev/events')).toBe(true))
+    const eventStream = MockEventSource.instances.find(instance => instance.url === '/sse/dev/events')!
+    const eventStreamCount = MockEventSource.instances.filter(instance => instance.url === '/sse/dev/events').length
+
+    eventStream.emit({
+      type: 'ADDED',
+      object: {
+        kind: 'Event',
+        metadata: {
+          uid: 'event-1',
+          name: 'api-pulled',
+          namespace: 'default',
+          creationTimestamp: '2026-07-08T00:00:01Z',
+        },
+        eventTime: '2026-07-08T00:00:01Z',
+        type: 'Normal',
+        reason: 'Pulled',
+        involvedObject: { uid: 'pod-1', kind: 'Pod', name: 'api-7d9f', namespace: 'default' },
+        message: 'Successfully pulled image',
+      },
+    })
+    eventStream.emit({ type: 'SYNCED' })
+    await user.click(screen.getByRole('tab', { name: 'Events' }))
+
+    expect(await screen.findByRole('row', { name: /Successfully pulled image/ })).toHaveTextContent('Pod/api-7d9f')
+
+    const modifiedPod = podEvent('pod-1', 'api-7d9f', { phase: 'Pending', ready: false })
+    modifiedPod.type = 'MODIFIED'
+    act(() => {
+      MockEventSource.instances[0].emit(modifiedPod)
+    })
+
+    expect(MockEventSource.instances.filter(instance => instance.url === '/sse/dev/events')).toHaveLength(eventStreamCount)
+    expect(eventStream.closed).toBe(false)
+  })
+
   it('streams logs in container tabs with pod prefixes', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(<App />)
@@ -580,12 +718,36 @@ describe('App', () => {
     await waitFor(() => {
       expect(MockEventSource.instances.some(instance => instance.url === '/logs/dev/pods/default/api-7d9f?tailLines=200')).toBe(true)
     })
-    const logsStream = MockEventSource.instances.find(instance => instance.url.startsWith('/logs/'))
+    let logsStream = MockEventSource.instances.find(instance => instance.url.startsWith('/logs/'))
     expect(logsStream).toBeDefined()
     expect(screen.getByRole('tab', { name: 'app' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('tab', { name: 'sidecar' })).toBeInTheDocument()
     expect(screen.getByText('Loading logs...')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Auto scroll on' })).toBeInTheDocument()
+
+    const statusOnlyPod = podEvent('pod-1', 'api-7d9f', { phase: 'Pending', ready: false })
+    statusOnlyPod.type = 'MODIFIED'
+    statusOnlyPod.object.spec.containers = [{ name: 'app' }, { name: 'sidecar' }]
+    act(() => {
+      MockEventSource.instances[0].emit(statusOnlyPod)
+    })
+
+    expect(MockEventSource.instances.filter(instance => instance.url === '/logs/dev/pods/default/api-7d9f?tailLines=200')).toHaveLength(1)
+    expect(logsStream?.closed).toBe(false)
+
+    const modifiedPod = podEvent('pod-1', 'api-7d9f')
+    modifiedPod.type = 'MODIFIED'
+    modifiedPod.object.spec.containers = [{ name: 'app' }, { name: 'sidecar' }, { name: 'debug' }]
+    act(() => {
+      MockEventSource.instances[0].emit(modifiedPod)
+    })
+
+    await waitFor(() => {
+      expect(MockEventSource.instances.filter(instance => instance.url === '/logs/dev/pods/default/api-7d9f?tailLines=200')).toHaveLength(2)
+    })
+    expect(logsStream?.closed).toBe(true)
+    logsStream = MockEventSource.instances.filter(instance => instance.url === '/logs/dev/pods/default/api-7d9f?tailLines=200').at(-1)
+    expect(screen.getByRole('tab', { name: 'debug' })).toBeInTheDocument()
 
     logsStream?.emit({ info: 'connected' })
     expect(screen.getByText('Loading logs...')).toBeInTheDocument()
@@ -640,5 +802,138 @@ describe('App', () => {
 
     await user.click(screen.getByRole('tab', { name: 'sidecar' }))
     expect(await screen.findByLabelText('Logs for sidecar')).toHaveTextContent('api-7d9f: sidecar line')
+  })
+
+  it('reconnects deployment logs when template containers change', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect, resourceSelect] = await screen.findAllByRole('combobox')
+    await chooseOption(user, contextSelect, /dev/)
+    await chooseOption(user, resourceSelect, 'deployments')
+    await waitFor(() => expect(MockEventSource.instances.some(instance => instance.url === '/sse/dev/deployments')).toBe(true))
+    const deploymentStream = MockEventSource.instances.find(instance => instance.url === '/sse/dev/deployments')!
+
+    const deployment = {
+      type: 'ADDED',
+      object: {
+        kind: 'Deployment',
+        metadata: {
+          uid: 'deployment-1',
+          name: 'api',
+          namespace: 'default',
+          creationTimestamp: '2026-07-07T23:00:00Z',
+        },
+        spec: {
+          replicas: 1,
+          template: {
+            spec: {
+              containers: [{ name: 'app' }],
+            },
+          },
+        },
+        status: {
+          readyReplicas: 1,
+          updatedReplicas: 1,
+          availableReplicas: 1,
+        },
+      },
+    }
+    deploymentStream.emit(deployment)
+    deploymentStream.emit({ type: 'SYNCED' })
+    await user.click(await screen.findByRole('row', { name: /api/ }))
+    await user.click(screen.getByRole('tab', { name: 'Logs' }))
+    await waitFor(() => {
+      expect(MockEventSource.instances.filter(instance => instance.url === '/logs/dev/deployments/default/api?tailLines=200')).toHaveLength(1)
+    })
+    const logsStream = MockEventSource.instances.find(instance => instance.url === '/logs/dev/deployments/default/api?tailLines=200')!
+
+    const modifiedDeployment = structuredClone(deployment)
+    modifiedDeployment.type = 'MODIFIED'
+    modifiedDeployment.object.spec.template.spec.containers = [{ name: 'app' }, { name: 'debug' }]
+    act(() => {
+      deploymentStream.emit(modifiedDeployment)
+    })
+
+    await waitFor(() => {
+      expect(MockEventSource.instances.filter(instance => instance.url === '/logs/dev/deployments/default/api?tailLines=200')).toHaveLength(2)
+    })
+    expect(logsStream.closed).toBe(true)
+    expect(screen.getByRole('tab', { name: 'debug' })).toBeInTheDocument()
+  })
+
+  it('clears log stream reconnect errors after recovery info', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect] = await screen.findAllByRole('combobox')
+    await chooseOption(user, contextSelect, /dev/)
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    MockEventSource.instances[0].emit(podEvent('pod-1', 'api-7d9f'))
+    MockEventSource.instances[0].emit({ type: 'SYNCED' })
+    await user.click(await screen.findByRole('row', { name: /api-7d9f/ }))
+    await user.click(screen.getByRole('tab', { name: 'Logs' }))
+    await waitFor(() => {
+      expect(MockEventSource.instances.some(instance => instance.url === '/logs/dev/pods/default/api-7d9f?tailLines=200')).toBe(true)
+    })
+    const logsStream = MockEventSource.instances.find(instance => instance.url.startsWith('/logs/'))!
+
+    logsStream.emitError()
+    expect(await screen.findByText('Log stream interrupted; waiting for EventSource to reconnect')).toBeInTheDocument()
+
+    logsStream.emit({ type: 'INFO', info: 'following logs for pod api-7d9f' })
+
+    await waitFor(() => {
+      expect(screen.queryByText('Log stream interrupted; waiting for EventSource to reconnect')).not.toBeInTheDocument()
+    })
+  })
+
+  it('keeps backend log errors visible across later stream activity', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect] = await screen.findAllByRole('combobox')
+    await chooseOption(user, contextSelect, /dev/)
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    MockEventSource.instances[0].emit(podEvent('pod-1', 'api-7d9f'))
+    MockEventSource.instances[0].emit({ type: 'SYNCED' })
+    await user.click(await screen.findByRole('row', { name: /api-7d9f/ }))
+    await user.click(screen.getByRole('tab', { name: 'Logs' }))
+    await waitFor(() => {
+      expect(MockEventSource.instances.some(instance => instance.url === '/logs/dev/pods/default/api-7d9f?tailLines=200')).toBe(true)
+    })
+    const logsStream = MockEventSource.instances.find(instance => instance.url.startsWith('/logs/'))!
+
+    logsStream.emit({ type: 'ERROR', error: 'pods/log is forbidden' })
+    expect(await screen.findByText('pods/log is forbidden')).toBeInTheDocument()
+
+    act(() => {
+      logsStream.emit({ type: 'INFO', info: 'following logs for pod api-7d9f' })
+    })
+
+    expect(screen.getByText('pods/log is forbidden')).toBeInTheDocument()
+
+    act(() => {
+      logsStream.emit({
+        type: 'LOG',
+        pod: 'api-7d9f',
+        container: 'api',
+        timestamp: '2026-07-08T00:00:01Z',
+        line: 'api still streaming',
+        seq: 1,
+      })
+    })
+
+    expect(screen.getByText('pods/log is forbidden')).toBeInTheDocument()
+    expect(screen.getByText(/api still streaming/)).toBeInTheDocument()
+
+    act(() => {
+      logsStream.emitError()
+    })
+
+    expect(screen.getByText('pods/log is forbidden')).toBeInTheDocument()
+    expect(screen.queryByText('Log stream interrupted; waiting for EventSource to reconnect')).not.toBeInTheDocument()
   })
 })

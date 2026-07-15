@@ -56,6 +56,7 @@ Contact points
 
 Security
 - Never exfiltrate kubeconfig or secrets. When debugging, redact sensitive fields.
+- kube-watch intentionally displays Kubernetes Secret `data` and `stringData` in the local details YAML when the active kubeconfig user is authorized to read them. Do not treat this as a bug by default; document any review concern as an accepted local/operator-use risk unless the change broadens access, persists secrets, logs them, or sends them outside the local browser/backend session.
 
 Notes
 - Prefer conservative changes that preserve current behavior. When adding persistence or new flags, make them opt-in behind flags.

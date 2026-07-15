@@ -184,42 +184,61 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
         }}
       />
       <DetailsDrawer
-        selectedItem={selectedItem}
-        selectedKey={selectedKey}
-        resource={resource}
-        detailsItem={detailsItem}
-        detailsPanelRef={detailsPanelRef}
-        detailsTab={detailsTab}
-        setDetailsTab={setDetailsTab}
-        showFullDetails={showFullDetails}
-        setShowFullDetails={setShowFullDetails}
-        setSelectedKey={setSelectedKey}
-        supportsEvents={supportsEvents}
-        supportsLogs={supportsLogs}
-        supportsHistory={supportsHistory}
-        now={now}
-        columnsByResource={columnsByResource}
-        objectKey={objectKey}
-        sortedSelectedEvents={sortedSelectedEvents}
-        eventsLoading={eventsLoading}
-        eventsError={eventsError}
-        helmHistory={helmHistory}
-        helmHistoryLoading={helmHistoryLoading}
-        helmHistoryError={helmHistoryError}
-        logDetailsRef={logDetailsRef}
-        logTailLines={logTailLines}
-        setLogTailLines={setLogTailLines}
-        autoScrollLogs={autoScrollLogs}
-        setAutoScrollLogs={setAutoScrollLogs}
-        logContainers={logContainers}
-        activeLogContainer={activeLogContainer}
-        setActiveLogContainer={setActiveLogContainer}
-        logsLoading={logsLoading}
-        logsError={logsError}
-        sortedLogEntries={sortedLogEntries}
-        formatDurationSince={formatDurationSince}
-        formatLogTimestamp={formatLogTimestamp}
-        logEntryKey={logEntryKey}
+        selection={{
+          item: selectedItem,
+          key: selectedKey,
+          resource,
+          detailsItem,
+          panelRef: detailsPanelRef,
+          onClose: () => {
+            setSelectedKey(null)
+            setShowFullDetails(false)
+            setDetailsTab('yaml')
+          },
+        }}
+        tabs={{
+          active: detailsTab,
+          onChange: setDetailsTab,
+          supportsEvents,
+          supportsLogs,
+          supportsHistory,
+        }}
+        yaml={{
+          showFull: showFullDetails,
+          onToggleFull: () => setShowFullDetails(prev => !prev),
+        }}
+        events={{
+          columns: columnsByResource.events,
+          items: sortedSelectedEvents,
+          loading: eventsLoading,
+          error: eventsError,
+          now,
+          objectKey,
+        }}
+        history={{
+          items: helmHistory,
+          loading: helmHistoryLoading,
+          error: helmHistoryError,
+          now,
+        }}
+        logs={{
+          detailsRef: logDetailsRef,
+          tailLines: logTailLines,
+          onTailLinesChange: setLogTailLines,
+          autoScroll: autoScrollLogs,
+          onToggleAutoScroll: () => setAutoScrollLogs(prev => !prev),
+          containers: logContainers,
+          activeContainer: activeLogContainer,
+          onActiveContainerChange: setActiveLogContainer,
+          loading: logsLoading,
+          error: logsError,
+          entries: sortedLogEntries,
+        }}
+        formatters={{
+          formatDurationSince,
+          formatLogTimestamp,
+          logEntryKey,
+        }}
       />
     </Box>
   )

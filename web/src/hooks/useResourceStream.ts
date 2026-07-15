@@ -14,16 +14,21 @@ export function useResourceStream(ctx: string, resource: string, { onReset, onSe
   const esRef = useRef<EventSource | null>(null)
 
   useEffect(() => {
-    if (!ctx) return
     if (esRef.current) {
       esRef.current.close()
       esRef.current = null
     }
 
     setItems(new Map())
-    setIsLoading(true)
     setLoadError(null)
     onReset()
+
+    if (!ctx) {
+      setIsLoading(false)
+      return
+    }
+
+    setIsLoading(true)
 
     const url = `/sse/${encodeURIComponent(ctx)}/${encodeURIComponent(resource)}`
     const es = new EventSource(url)

@@ -11,6 +11,8 @@ type ResourceLogsOptions = {
   tailLines: number
 }
 
+const LOG_RECONNECT_ERROR = 'Log stream interrupted; waiting for EventSource to reconnect'
+
 export function useResourceLogs({
   ctx,
   resource,
@@ -28,11 +30,19 @@ export function useResourceLogs({
   const esRef = useRef<EventSource | null>(null)
   const selectedName = selectedItem?.metadata?.name || ''
   const selectedNamespace = selectedItem?.metadata?.namespace || ''
+  const selectedContainerSpecKey = selectedItem ? containerSpecKey(selectedItem, resource) : ''
 
-  const containers = useMemo(
-    () => selectedItem ? logContainerNames(selectedItem, resource, entries) : [],
-    [selectedItem, resource, entries],
+  const specContainers = useMemo(
+    () => selectedItem ? logContainerNames(selectedItem, resource, []) : [],
+    [resource, selectedContainerSpecKey],
   )
+  const containers = useMemo(() => {
+    const names = new Set(specContainers)
+    for (const entry of entries) {
+      if (entry.container) names.add(entry.container)
+    }
+    return [...names].sort()
+  }, [entries, specContainers])
   const containersKey = containers.join('\u0000')
 
   const sortedEntries = useMemo(() => {
@@ -73,7 +83,7 @@ export function useResourceLogs({
         const env: LogEnvelope = JSON.parse(ev.data)
         if (env.type === 'LOG' && env.pod && env.container && env.line !== undefined) {
           setLoading(false)
-          setError(null)
+          setError(prev => prev === LOG_RECONNECT_ERROR ? null : prev)
           const entry: LogEntry = {
             pod: env.pod,
             container: env.container,
@@ -89,6 +99,7 @@ export function useResourceLogs({
           return
         }
         if (env.type === 'INFO') {
+          setError(prev => prev === LOG_RECONNECT_ERROR ? null : prev)
           return
         }
         if (env.type === 'ERROR' || env.error) {
@@ -101,7 +112,7 @@ export function useResourceLogs({
     }
     es.onerror = (streamError) => {
       setLoading(false)
-      setError('Log stream interrupted; waiting for EventSource to reconnect')
+      setError(prev => prev && prev !== LOG_RECONNECT_ERROR ? prev : LOG_RECONNECT_ERROR)
       console.warn('log stream error', streamError)
     }
     esRef.current = es
@@ -109,7 +120,7 @@ export function useResourceLogs({
       es.close()
       esRef.current = null
     }
-  }, [ctx, resource, selectedName, selectedNamespace, supportsLogs, detailsTab, tailLines])
+  }, [ctx, resource, selectedName, selectedNamespace, selectedContainerSpecKey, supportsLogs, detailsTab, tailLines])
 
   useEffect(() => {
     if (!autoScroll || !detailsRef.current) return
@@ -127,5 +138,18 @@ export function useResourceLogs({
     error,
     sortedEntries,
     entryCount: entries.length,
+  }
+
+  function containerSpecKey(object: any, resource: string) {
+    const spec = resource === 'deployments' ? object?.spec?.template?.spec : object?.spec
+    return [
+      selectedContainerNames(spec?.initContainers),
+      selectedContainerNames(spec?.containers),
+      selectedContainerNames(spec?.ephemeralContainers),
+    ].join('|')
+  }
+
+  function selectedContainerNames(containers: any[] | undefined) {
+    return (containers || []).map(container => container?.name || '').join('\u0000')
   }
 }
