@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="kube-watch">
+  <defs>
+    <linearGradient id="bg" x1="10" y1="8" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <path d="M12 32s8-14 20-14 20 14 20 14-8 14-20 14S12 32 12 32Z" fill="#dbeafe"/>
+  <circle cx="32" cy="32" r="11" fill="#2563eb"/>
+  <circle cx="32" cy="32" r="5" fill="#f8fafc"/>
+  <path d="M32 9v8M32 47v8M9 32h8M47 32h8" stroke="#93c5fd" stroke-width="5" stroke-linecap="round"/>
+</svg>
