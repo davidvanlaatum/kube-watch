@@ -13,6 +13,7 @@ import { DetailsDrawer } from './components/DetailsDrawer'
 import { ResourceFilters } from './components/ResourceFilters'
 import { ResourceTable } from './components/ResourceTable'
 import { useBackendLogs } from './hooks/useBackendLogs'
+import { useHelmHistory } from './hooks/useHelmHistory'
 import { useResourceStream } from './hooks/useResourceStream'
 import { useViewRoute } from './hooks/useViewRoute'
 import {
@@ -100,9 +101,6 @@ export default function App() {
   const [selectedEvents, setSelectedEvents] = useState<Map<string, any>>(new Map())
   const [eventsLoading, setEventsLoading] = useState(false)
   const [eventsError, setEventsError] = useState<string | null>(null)
-  const [helmHistory, setHelmHistory] = useState<any[]>([])
-  const [helmHistoryLoading, setHelmHistoryLoading] = useState(false)
-  const [helmHistoryError, setHelmHistoryError] = useState<string | null>(null)
   const [logEntries, setLogEntries] = useState<LogEntry[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
   const [logsError, setLogsError] = useState<string | null>(null)
@@ -123,9 +121,6 @@ export default function App() {
     setShowFullDetails(false)
     setLogEntries([])
     setLogsError(null)
-    setHelmHistory([])
-    setHelmHistoryError(null)
-    setHelmHistoryLoading(false)
     setActiveLogContainer('')
     setSort(null)
   }, [])
@@ -135,8 +130,6 @@ export default function App() {
       if (prev === key) {
         setShowFullDetails(false)
         setDetailsTab('yaml')
-        setHelmHistory([])
-        setHelmHistoryError(null)
         return null
       }
       return prev
@@ -175,6 +168,11 @@ export default function App() {
   const filteredItems = allItems.filter(item => matchesFilters(resource, item, filters))
   const sortedItems = sortItems(resource, filteredItems, sort)
   const selectedItem = selectedKey ? items.get(selectedKey) : null
+  const {
+    history: helmHistory,
+    loading: helmHistoryLoading,
+    error: helmHistoryError,
+  } = useHelmHistory(ctx, resource, selectedItem, detailsTab)
   const detailsItem = selectedItem && (showFullDetails ? selectedItem : cleanKubernetesObject(selectedItem))
   const supportsEvents = Boolean(selectedItem && eventSupportedResources.has(resource))
   const supportsLogs = Boolean(selectedItem && logSupportedResources.has(resource))
@@ -225,46 +223,6 @@ export default function App() {
       setFilters(prev => ({ ...prev, status: '' }))
     }
   }, [filters.status, showStatusFilter])
-
-  useEffect(() => {
-    setHelmHistory([])
-    setHelmHistoryError(null)
-
-    if (!ctx || !selectedItem || resource !== 'helmreleases' || detailsTab !== 'history') {
-      setHelmHistoryLoading(false)
-      return
-    }
-
-    const driver = selectedItem.status?.storageDriver || 'secrets'
-    const releaseName = selectedItem.metadata?.name || ''
-    if (!releaseName) {
-      setHelmHistoryLoading(false)
-      return
-    }
-
-    const controller = new AbortController()
-    setHelmHistoryLoading(true)
-    fetch(`/api/helm-history/${encodeURIComponent(ctx)}/${encodeURIComponent(driver)}/${encodeURIComponent(releaseName)}`, {
-      signal: controller.signal,
-    }).then(async response => {
-      if (!response.ok) {
-        throw new Error(await response.text() || `Helm history failed with ${response.status}`)
-      }
-      return response.json()
-    }).then(history => {
-      setHelmHistory(Array.isArray(history) ? history : [])
-      setHelmHistoryError(null)
-    }).catch(error => {
-      if (error.name === 'AbortError') return
-      setHelmHistoryError(error.message || String(error))
-    }).finally(() => {
-      if (!controller.signal.aborted) {
-        setHelmHistoryLoading(false)
-      }
-    })
-
-    return () => controller.abort()
-  }, [ctx, resource, selectedItem, detailsTab])
 
   useEffect(() => {
     if (eventsEsRef.current) {
@@ -459,8 +417,6 @@ export default function App() {
               setDetailsTab('yaml')
               setLogEntries([])
               setLogsError(null)
-              setHelmHistory([])
-              setHelmHistoryError(null)
               setActiveLogContainer('')
             }}
           />
