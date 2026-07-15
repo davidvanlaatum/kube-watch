@@ -231,7 +231,14 @@ export function DetailsDrawer({
           )}
           {detailsTab === 'logs' && supportsLogs && (
             <Box ref={logDetailsRef} className="log-details">
-              <Box className="log-controls">
+              <Box
+                className="log-controls"
+                sx={{
+                  bgcolor: 'background.paper',
+                  borderColor: 'divider',
+                  boxShadow: theme => `0 1px 0 ${theme.palette.divider}`,
+                }}
+              >
                 <Stack direction="row" spacing={1.5} className="log-options" sx={{ alignItems: 'center' }}>
                   <TextField
                     label="Tail lines"
@@ -280,7 +287,15 @@ export function DetailsDrawer({
                 <Alert severity="info" className="empty-state">Waiting for log lines for container {activeLogContainer}...</Alert>
               )}
               {sortedLogEntries.length > 0 && (
-                <Box className="log-output" aria-label={`Logs for ${activeLogContainer}`}>
+                <Box
+                  className="log-output"
+                  aria-label={`Logs for ${activeLogContainer}`}
+                  sx={{
+                    bgcolor: 'background.paper',
+                    color: 'text.primary',
+                    borderColor: 'divider',
+                  }}
+                >
                   {sortedLogEntries.map(entry => (
                     <Box key={logEntryKey(entry)} className="log-line">
                       <span className="log-time">{formatLogTimestamp(entry.timestamp)} </span>
