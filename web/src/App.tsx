@@ -15,6 +15,7 @@ import { ResourceTable } from './components/ResourceTable'
 import { useBackendLogs } from './hooks/useBackendLogs'
 import { useHelmHistory } from './hooks/useHelmHistory'
 import { useResourceEvents } from './hooks/useResourceEvents'
+import { useResourceLogs } from './hooks/useResourceLogs'
 import { useResourceStream } from './hooks/useResourceStream'
 import { useViewRoute } from './hooks/useViewRoute'
 import {
@@ -27,7 +28,6 @@ import {
   formatLogTimestamp,
   hasActiveFilters,
   labelSuggestions,
-  logContainerNames,
   logEntryKey,
   logSupportedResources,
   matchesFilters,
@@ -41,8 +41,6 @@ import {
 import type {
   ContextInfo,
   DetailsTab,
-  LogEntry,
-  LogEnvelope,
   SortState,
   TableFilters,
   VersionInfo,
@@ -97,15 +95,8 @@ export default function App() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [detailsTab, setDetailsTab] = useState<DetailsTab>('yaml')
   const [showFullDetails, setShowFullDetails] = useState(false)
-  const [logEntries, setLogEntries] = useState<LogEntry[]>([])
-  const [logsLoading, setLogsLoading] = useState(false)
-  const [logsError, setLogsError] = useState<string | null>(null)
-  const [activeLogContainer, setActiveLogContainer] = useState<string>('')
   const [logTailLines, setLogTailLines] = useState(200)
-  const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const { logs: backendLogs, dismissLog: dismissBackendLog } = useBackendLogs()
-  const logsEsRef = useRef<EventSource | null>(null)
-  const logDetailsRef = useRef<HTMLDivElement | null>(null)
   const detailsPanelRef = useRef<HTMLDivElement | null>(null)
   const [detailsOffset, setDetailsOffset] = useState(0)
 
@@ -114,9 +105,6 @@ export default function App() {
     setSelectedKey(null)
     setDetailsTab('yaml')
     setShowFullDetails(false)
-    setLogEntries([])
-    setLogsError(null)
-    setActiveLogContainer('')
     setSort(null)
   }, [])
 
@@ -176,24 +164,26 @@ export default function App() {
     error: eventsError,
   } = useResourceEvents(ctx, resource, selectedItem, supportsEvents)
   const supportsLogs = Boolean(selectedItem && logSupportedResources.has(resource))
+  const {
+    detailsRef: logDetailsRef,
+    containers: logContainers,
+    activeContainer: activeLogContainer,
+    setActiveContainer: setActiveLogContainer,
+    autoScroll: autoScrollLogs,
+    setAutoScroll: setAutoScrollLogs,
+    loading: logsLoading,
+    error: logsError,
+    sortedEntries: sortedLogEntries,
+    entryCount: logEntryCount,
+  } = useResourceLogs({
+    ctx,
+    resource,
+    selectedItem,
+    supportsLogs,
+    detailsTab,
+    tailLines: logTailLines,
+  })
   const supportsHistory = Boolean(selectedItem && resource === 'helmreleases')
-  const selectedName = selectedItem?.metadata?.name || ''
-  const selectedNamespace = selectedItem?.metadata?.namespace || ''
-  const logContainers = useMemo(
-    () => selectedItem ? logContainerNames(selectedItem, resource, logEntries) : [],
-    [selectedItem, resource, logEntries],
-  )
-  const logContainersKey = logContainers.join('\u0000')
-  const sortedLogEntries = useMemo(() => {
-    return logEntries
-      .filter(entry => entry.container === activeLogContainer)
-      .sort((a, b) => {
-        const timeCompare = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        if (timeCompare !== 0) return timeCompare
-        if (a.pod !== b.pod) return a.pod.localeCompare(b.pod)
-        return a.seq - b.seq
-      })
-  }, [logEntries, activeLogContainer])
 
   useEffect(() => {
     if (!selectedItem || !detailsPanelRef.current) {
@@ -215,83 +205,13 @@ export default function App() {
 
     window.addEventListener('resize', updateDetailsOffset)
     return () => window.removeEventListener('resize', updateDetailsOffset)
-  }, [selectedItem, detailsTab, showFullDetails, helmHistory.length, helmHistoryLoading, logEntries.length, sortedSelectedEvents.length])
+  }, [selectedItem, detailsTab, showFullDetails, helmHistory.length, helmHistoryLoading, logEntryCount, sortedSelectedEvents.length])
 
   useEffect(() => {
     if (!showStatusFilter && filters.status) {
       setFilters(prev => ({ ...prev, status: '' }))
     }
   }, [filters.status, showStatusFilter])
-
-  useEffect(() => {
-    if (!logContainers.includes(activeLogContainer)) {
-      setActiveLogContainer(logContainers[0] || '')
-    }
-  }, [activeLogContainer, logContainers, logContainersKey])
-
-  useEffect(() => {
-    if (logsEsRef.current) {
-      logsEsRef.current.close()
-      logsEsRef.current = null
-    }
-    setLogEntries([])
-    setLogsError(null)
-
-    if (!ctx || !selectedName || !selectedNamespace || !supportsLogs || detailsTab !== 'logs') {
-      setLogsLoading(false)
-      return
-    }
-
-    setLogsLoading(true)
-    const url = `/logs/${encodeURIComponent(ctx)}/${encodeURIComponent(resource)}/${encodeURIComponent(selectedNamespace)}/${encodeURIComponent(selectedName)}?tailLines=${encodeURIComponent(String(logTailLines))}`
-    const es = new EventSource(url)
-    es.onmessage = (ev) => {
-      try {
-        const env: LogEnvelope = JSON.parse(ev.data)
-        if (env.type === 'LOG' && env.pod && env.container && env.line !== undefined) {
-          setLogsLoading(false)
-          setLogsError(null)
-          const entry: LogEntry = {
-            pod: env.pod,
-            container: env.container,
-            timestamp: env.timestamp || new Date().toISOString(),
-            line: env.line,
-            seq: env.seq || 0,
-          }
-          setLogEntries(prev => {
-            const key = logEntryKey(entry)
-            if (prev.some(existing => logEntryKey(existing) === key)) return prev
-            return [...prev, entry].slice(-10000)
-          })
-          return
-        }
-        if (env.type === 'INFO') {
-          return
-        }
-        if (env.type === 'ERROR' || env.error) {
-          setLogsLoading(false)
-          setLogsError(env.error || 'Log stream error')
-        }
-      } catch (e) {
-        console.warn('log stream parse', e)
-      }
-    }
-    es.onerror = (e) => {
-      setLogsLoading(false)
-      setLogsError('Log stream interrupted; waiting for EventSource to reconnect')
-      console.warn('log stream error', e)
-    }
-    logsEsRef.current = es
-    return () => {
-      es.close()
-      logsEsRef.current = null
-    }
-  }, [ctx, resource, selectedName, selectedNamespace, supportsLogs, detailsTab, logTailLines])
-
-  useEffect(() => {
-    if (!autoScrollLogs || !logDetailsRef.current) return
-    logDetailsRef.current.scrollTop = logDetailsRef.current.scrollHeight
-  }, [autoScrollLogs, sortedLogEntries.length, activeLogContainer])
 
   return (
     <ThemeProvider theme={theme}>
@@ -341,9 +261,6 @@ export default function App() {
             onSelectionChanged={() => {
               setShowFullDetails(false)
               setDetailsTab('yaml')
-              setLogEntries([])
-              setLogsError(null)
-              setActiveLogContainer('')
             }}
           />
           <DetailsDrawer
