@@ -29,7 +29,7 @@ When creating PRs
 - Include changelog notes and a short reproduction plan for runtime changes.
 - Add Go, Vitest, or Playwright coverage for behavior changes where practical.
 - Check docs for stale setup steps, resource lists, limitations, and troubleshooting guidance before committing.
-- For non-trivial direct agent changes, run a pre-commit review pass even when no PR is created. Cover Senior Go, Senior QA, Kubernetes/ops, Security, and Release/docs review lenses. Use the PR template when a PR is created.
+- For non-trivial direct agent changes, run a pre-commit review pass even when no PR is created. Cover Senior Go/TypeScript, Senior QA, Kubernetes/ops, Security, and Release/docs review lenses. Use the PR template when a PR is created.
 - Fix actionable in-scope review findings before committing, re-run relevant validation, and repeat the review/fix/validate loop until no actionable in-scope feedback remains. If any review feedback is not actioned, call it out with the reason.
 
 If you need more context

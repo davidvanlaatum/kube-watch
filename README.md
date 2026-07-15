@@ -48,7 +48,7 @@ CI:
 Review process:
 - For direct agent-assisted changes, run the same review lenses before committing even when no PR is created.
 - Use the pull request template for every non-trivial PR.
-- Required review lenses: Senior Go for concurrency/watch/channel correctness, Senior QA for regression and browser/SSE behavior, Kubernetes/ops for RBAC/kubeconfig/resourceVersion behavior, Security for credentials/self-update/TLS concerns, and Release/docs for GoReleaser/version/install documentation.
+- Required review lenses: Senior Go/TypeScript for concurrency/watch/channel correctness plus React hook dependencies, EventSource lifecycle, browser routing, and UI state consistency; Senior QA for regression and browser/SSE behavior; Kubernetes/ops for RBAC/kubeconfig/resourceVersion behavior; Security for credentials/self-update/TLS concerns; and Release/docs for GoReleaser/version/install documentation.
 - Actionable in-scope review findings should be fixed before commit, followed by relevant validation and another review pass. Repeat review/fix/validate until no actionable in-scope feedback remains. Any review feedback that is not actioned must be called out with the reason.
 - Small documentation-only changes may use a lighter review, but runtime, release, auth, watch, log, or self-update changes should cover all lenses.
 

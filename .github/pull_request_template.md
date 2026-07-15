@@ -10,7 +10,7 @@
 
 ## Review checklist
 
-- [ ] Senior Go review: concurrency, context/cancellation, channel lifecycle, locking, error handling, and client-go watch behavior.
+- [ ] Senior Go/TypeScript review: Go concurrency, context/cancellation, channel lifecycle, locking, error handling, and client-go watch behavior; TypeScript/React hook dependencies, EventSource lifecycle, browser routing, UI state consistency, and error handling.
 - [ ] Senior QA review: regression coverage, deterministic tests, browser behavior, SSE/log reconnect scenarios, and edge cases.
 - [ ] Kubernetes/ops review: kubeconfig loading, namespace/RBAC assumptions, GKE exec plugin behavior, resourceVersion/re-list semantics, and operational logs.
 - [ ] Security review: no credential exposure, safe self-update/download behavior, checksum validation, TLS/auth implications, and secret redaction.

@@ -109,7 +109,7 @@ Contributing / PR checklist
 - Run the backend locally and validate the UI connects and receives initial snapshot.
 - Add unit, component, or Playwright tests for non-trivial logic and UI behavior.
 - Prefer `go test -race ./...` for Go validation where possible; CI runs Go tests with the race detector.
-- For non-trivial direct agent changes, complete a pre-commit review across Senior Go, Senior QA, Kubernetes/ops, Security, and Release/docs lenses even when no PR is created. Use the PR template when a PR is created.
+- For non-trivial direct agent changes, complete a pre-commit review across Senior Go/TypeScript, Senior QA, Kubernetes/ops, Security, and Release/docs lenses even when no PR is created. Use the PR template when a PR is created.
 - Fix actionable in-scope review findings before committing, then re-run relevant validation and review. Repeat review/fix/validate until no actionable in-scope feedback remains. Call out any review feedback that is not actioned and why.
 - Keep README.md, PLAN.md, and agent instructions current when behavior, setup, resource support, logging, or troubleshooting changes.
 - Follow the commit trailer convention when committing: include the Copilot Co-authored-by trailer if changes were assisted by the agent.
