@@ -47,6 +47,7 @@ Escalation & Questions
 
 Pull requests & commits
 - Make small, reviewable changes. Use descriptive commit messages. Include Co-authored-by trailer for Copilot commits when requested.
+- Immediately `git add` every newly created file that is intended to be committed, so untracked files cannot be omitted from validation, review, or release changes.
 - Before committing, check README.md, PLAN.md, and agent instructions for stale setup steps, resource lists, limitations, or troubleshooting guidance.
 - For non-trivial direct agent changes, run a pre-commit review pass even when no PR is created. Cover these lenses: Senior Go/TypeScript (Go concurrency, locking, channels, watch lifecycle; TypeScript/React hook dependencies, EventSource lifecycle, browser routing, UI state consistency, and error handling), Senior QA (regression coverage, browser/SSE/log behavior), Kubernetes/ops (RBAC, kubeconfig, GKE exec plugin, resourceVersion semantics), Security (credentials, self-update, TLS, redaction), and Release/docs (GoReleaser, versions, install/upgrade docs). Use the PR template when a PR is created.
 - Fix actionable in-scope review findings before committing, re-run relevant validation, and repeat the review/fix/validate loop until no actionable in-scope feedback remains. If any review feedback is not actioned, call it out with the reason.

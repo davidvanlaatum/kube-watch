@@ -49,7 +49,7 @@ export type TableFilters = {
 export type Column = {
   id: string
   header: string
-  value: (object: any, now: number) => ReactNode
+  value: (object: any) => ReactNode
   align?: 'left' | 'center' | 'right'
   sortValue?: (object: any) => string | number
 }

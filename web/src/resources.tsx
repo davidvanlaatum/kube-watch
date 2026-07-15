@@ -1,7 +1,7 @@
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import { Tooltip } from '@mui/material'
 import { useState } from 'react'
-import type { ReactNode, SyntheticEvent } from 'react'
+import type { SyntheticEvent } from 'react'
+import { RelativeAge, formatDurationBetween } from './components/RelativeAge'
 import type { Column, SortDirection, SortState, TableFilters, ContextInfo, LogEntry } from './types'
 
 export const resourceOptions = [
@@ -226,8 +226,8 @@ function NameCell({ name }: { name: string }) {
   )
 }
 
-function age(o: any, now: number) {
-  return formatDurationSince(o.metadata?.creationTimestamp, now)
+function age(o: any) {
+  return <RelativeAge timestamp={o.metadata?.creationTimestamp} />
 }
 
 function duration(o: any) {
@@ -236,12 +236,12 @@ function duration(o: any) {
   return start && end ? formatDurationBetween(start, end) : '<none>'
 }
 
-function lastSchedule(o: any, now: number) {
-  return o.status?.lastScheduleTime ? formatDurationSince(o.status.lastScheduleTime, now) : '<none>'
+function lastSchedule(o: any) {
+  return <RelativeAge timestamp={o.status?.lastScheduleTime} fallback="<none>" />
 }
 
-function eventLastSeen(o: any, now: number) {
-  return formatDurationSince(o.lastTimestamp || o.eventTime || o.metadata?.creationTimestamp, now)
+function eventLastSeen(o: any) {
+  return <RelativeAge timestamp={o.lastTimestamp || o.eventTime || o.metadata?.creationTimestamp} />
 }
 
 function eventObject(o: any) {
@@ -288,7 +288,7 @@ function isReady(resource: string, object: any) {
   return true
 }
 
-function podRestarts(o: any, now: number) {
+function podRestarts(o: any) {
   const restarts = podRestartCount(o)
   if (restarts === 0) return 0
 
@@ -299,9 +299,11 @@ function podRestarts(o: any, now: number) {
     .at(-1)
   if (!lastRestartTime) return restarts
 
-  const restartAge = relativeDurationSince(lastRestartTime, now)
-  if (!restartAge) return restarts
-  return <TimestampTooltip timestamp={lastRestartTime}>{restarts} ({restartAge} ago)</TimestampTooltip>
+  return (
+    <RelativeAge timestamp={lastRestartTime} fallback={restarts}>
+      {restartAge => `${restarts} (${restartAge} ago)`}
+    </RelativeAge>
+  )
 }
 
 function podStatuses(o: any) {
@@ -426,8 +428,8 @@ function helmStatus(o: any) {
   return o.status?.status || ''
 }
 
-function helmUpdated(o: any, now: number) {
-  return formatDurationSince(o.status?.updated, now)
+function helmUpdated(o: any) {
+  return <RelativeAge timestamp={o.status?.updated} />
 }
 
 function hpaReference(o: any) {
@@ -478,51 +480,6 @@ function metricTargetValue(target?: any) {
     target?.averageValue ??
     target?.value ??
     '<unknown>'
-}
-
-export function formatDurationSince(timestamp: string | undefined, now = Date.now()) {
-  const duration = relativeDurationSince(timestamp, now)
-  if (!duration) return ''
-  return <TimestampTooltip timestamp={timestamp}>{duration}</TimestampTooltip>
-}
-
-function TimestampTooltip({ timestamp, children }: { timestamp: string | undefined; children: ReactNode }) {
-  const localTime = formatLocalTimestamp(timestamp)
-  return (
-    <Tooltip title={localTime || ''}>
-      <span>{children}</span>
-    </Tooltip>
-  )
-}
-
-function relativeDurationSince(timestamp: string | undefined, now = Date.now()) {
-  if (!timestamp) return ''
-  const timestampMillis = new Date(timestamp).getTime()
-  if (!Number.isFinite(timestampMillis)) return ''
-  return formatMillis(Math.max(0, now - timestampMillis))
-}
-
-function formatLocalTimestamp(timestamp: string | undefined) {
-  if (!timestamp) return ''
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleString()
-}
-
-function formatDurationBetween(start: string, end: string) {
-  return formatMillis(new Date(end).getTime() - new Date(start).getTime())
-}
-
-function formatMillis(milliseconds: number) {
-  if (!Number.isFinite(milliseconds) || milliseconds < 0) return ''
-  const seconds = Math.floor(milliseconds / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 48) return `${hours}h`
-  const days = Math.floor(hours / 24)
-  return `${days}d`
 }
 
 export function objectKey(object: any) {

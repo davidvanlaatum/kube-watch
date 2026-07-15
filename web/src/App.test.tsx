@@ -203,11 +203,22 @@ describe('App', () => {
     expect(row).toHaveTextContent('api-1.2.3')
     expect(row).toHaveTextContent('4.5.6')
     expect(row).toHaveTextContent('2')
+    await user.hover(within(row).getByText('5m'))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(new Date('2026-07-07T23:55:00Z').toLocaleString())
+    await user.unhover(within(row).getByText('5m'))
 
     await user.click(row)
     await user.click(screen.getByRole('tab', { name: 'History' }))
     expect(await screen.findByText('Install complete')).toBeInTheDocument()
     expect(screen.getByText('Upgrade complete')).toBeInTheDocument()
+    const installHistoryRow = screen.getByRole('row', { name: /Install complete/ })
+    await user.hover(within(installHistoryRow).getByText('1h'))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(new Date('2026-07-07T23:00:00Z').toLocaleString())
+    await user.unhover(within(installHistoryRow).getByText('1h'))
+    const upgradeHistoryRow = screen.getByRole('row', { name: /Upgrade complete/ })
+    await user.hover(within(upgradeHistoryRow).getByText('5m'))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(new Date('2026-07-07T23:55:00Z').toLocaleString())
+    await user.unhover(within(upgradeHistoryRow).getByText('5m'))
     expect(fetchMock.mock.calls.filter(call => call[0] === '/api/helm-history/dev/secrets/api')).toHaveLength(1)
 
     const modified = helmReleaseEvent('api')
@@ -334,7 +345,7 @@ describe('App', () => {
           uid: 'pod-1',
           name: 'api-7d9f',
           namespace: 'default',
-          creationTimestamp: '2026-07-07T23:00:00Z',
+          creationTimestamp: '2026-07-07T23:59:01Z',
         },
         spec: {
           nodeName: 'node-a',
@@ -357,13 +368,14 @@ describe('App', () => {
     await user.hover(within(row).getByText('2 (5m ago)'))
     expect(await screen.findByRole('tooltip')).toHaveTextContent(new Date('2026-07-07T23:55:00Z').toLocaleString())
     await user.unhover(within(row).getByText('2 (5m ago)'))
-    await user.hover(within(row).getByText('1h'))
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(new Date('2026-07-07T23:00:00Z').toLocaleString())
-    await user.unhover(within(row).getByText('1h'))
+    await user.hover(within(row).getByText('59s'))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(new Date('2026-07-07T23:59:01Z').toLocaleString())
+    await user.unhover(within(row).getByText('59s'))
     await vi.advanceTimersByTimeAsync(1000)
 
     await vi.advanceTimersByTimeAsync(60_000)
     expect(within(row).getByText('2 (6m ago)')).toBeInTheDocument()
+    expect(within(row).getByText('1m')).toBeInTheDocument()
 
     expect(within(row).getByRole('button', { name: 'Copy api-7d9f' })).toBeInTheDocument()
   })
@@ -666,7 +678,11 @@ describe('App', () => {
     eventStream.emit({ type: 'SYNCED' })
     await user.click(screen.getByRole('tab', { name: 'Events' }))
 
-    expect(await screen.findByRole('row', { name: /Successfully pulled image/ })).toHaveTextContent('Pod/api-7d9f')
+    const eventRow = await screen.findByRole('row', { name: /Successfully pulled image/ })
+    expect(eventRow).toHaveTextContent('Pod/api-7d9f')
+    await user.hover(within(eventRow).getByText('0s'))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(new Date('2026-07-08T00:00:01Z').toLocaleString())
+    await user.unhover(within(eventRow).getByText('0s'))
 
     const modifiedPod = podEvent('pod-1', 'api-7d9f', { phase: 'Pending', ready: false })
     modifiedPod.type = 'MODIFIED'

@@ -13,7 +13,6 @@ import type { Column, SortState } from '../types'
 type ResourceTableProps = {
   columns: Column[]
   items: any[]
-  now: number
   selectedKey: string | null
   detailsOffset: number
   hasSelectedItem: boolean
@@ -28,7 +27,6 @@ type ResourceTableProps = {
 export function ResourceTable({
   columns,
   items,
-  now,
   selectedKey,
   detailsOffset,
   hasSelectedItem,
@@ -82,7 +80,7 @@ export function ResourceTable({
                   return next
                 })}
               >
-                {columns.map(column => <TableCell key={column.id} align={column.align}>{column.value(item, now)}</TableCell>)}
+                {columns.map(column => <TableCell key={column.id} align={column.align}>{column.value(item)}</TableCell>)}
               </TableRow>
             )
           })}

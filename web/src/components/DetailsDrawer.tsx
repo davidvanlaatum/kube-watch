@@ -21,8 +21,9 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import type { RefObject, ReactNode } from 'react'
+import type { RefObject } from 'react'
 import { stringify } from 'yaml'
+import { RelativeAge } from './RelativeAge'
 import type { Column, DetailsTab, LogEntry } from '../types'
 
 type DetailsSelection = {
@@ -52,7 +53,6 @@ type EventsDetails = {
   items: any[]
   loading: boolean
   error: string | null
-  now: number
   objectKey: (object: any) => string
 }
 
@@ -60,7 +60,6 @@ type HistoryDetails = {
   items: any[]
   loading: boolean
   error: string | null
-  now: number
 }
 
 type LogsDetails = {
@@ -78,7 +77,6 @@ type LogsDetails = {
 }
 
 type DetailsFormatters = {
-  formatDurationSince: (timestamp: string | undefined, now?: number) => ReactNode
   formatLogTimestamp: (timestamp: string) => string
   logEntryKey: (entry: LogEntry) => string
 }
@@ -152,7 +150,7 @@ export function DetailsDrawer({
           </Tabs>
           {tabs.active === 'yaml' && <pre>{stringify(detailsItem)}</pre>}
           {tabs.active === 'history' && tabs.supportsHistory && (
-            <HistoryTab details={history} formatDurationSince={formatters.formatDurationSince} />
+            <HistoryTab details={history} />
           )}
           {tabs.active === 'events' && tabs.supportsEvents && <EventsTab details={events} />}
           {tabs.active === 'logs' && tabs.supportsLogs && (
@@ -171,10 +169,8 @@ export function DetailsDrawer({
 
 function HistoryTab({
   details,
-  formatDurationSince,
 }: {
   details: HistoryDetails
-  formatDurationSince: DetailsFormatters['formatDurationSince']
 }) {
   return (
     <Box className="event-details">
@@ -207,7 +203,7 @@ function HistoryTab({
                   <TableCell>{revision.status || ''}</TableCell>
                   <TableCell>{[revision.chart, revision.version].filter(Boolean).join('-')}</TableCell>
                   <TableCell>{revision.appVersion || ''}</TableCell>
-                  <TableCell align="right">{formatDurationSince(revision.updated, details.now)}</TableCell>
+                  <TableCell align="right"><RelativeAge timestamp={revision.updated} /></TableCell>
                   <TableCell>{revision.description || ''}</TableCell>
                 </TableRow>
               ))}
@@ -245,7 +241,7 @@ function EventsTab({ details }: { details: EventsDetails }) {
               {details.items.map((event: any) => (
                 <TableRow key={details.objectKey(event)}>
                   {details.columns.map(column => (
-                    <TableCell key={column.id} align={column.align}>{column.value(event, details.now)}</TableCell>
+                    <TableCell key={column.id} align={column.align}>{column.value(event)}</TableCell>
                   ))}
                 </TableRow>
               ))}

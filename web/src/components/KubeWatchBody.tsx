@@ -14,7 +14,6 @@ import {
   columnsByResource,
   emptyFilters,
   eventSupportedResources,
-  formatDurationSince,
   formatLogTimestamp,
   hasActiveFilters,
   labelSuggestions,
@@ -35,7 +34,6 @@ type KubeWatchBodyProps = {
 }
 
 export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
-  const [now, setNow] = useState(Date.now())
   const [filters, setFilters] = useState<TableFilters>(emptyFilters)
   const [sort, setSort] = useState<SortState>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -69,11 +67,6 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
     onReset: resetResourceViewState,
     onSelectedDeleted: handleSelectedResourceDeleted,
   })
-
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 30_000)
-    return () => window.clearInterval(id)
-  }, [])
 
   const columns = columnsByResource[resource] || columnsByResource.pods
   const allItems = [...items.values()]
@@ -169,7 +162,6 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
       <ResourceTable
         columns={columns}
         items={sortedItems}
-        now={now}
         selectedKey={selectedKey}
         detailsOffset={detailsOffset}
         hasSelectedItem={Boolean(selectedItem)}
@@ -212,14 +204,12 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
           items: sortedSelectedEvents,
           loading: eventsLoading,
           error: eventsError,
-          now,
           objectKey,
         }}
         history={{
           items: helmHistory,
           loading: helmHistoryLoading,
           error: helmHistoryError,
-          now,
         }}
         logs={{
           detailsRef: logDetailsRef,
@@ -235,7 +225,6 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
           entries: sortedLogEntries,
         }}
         formatters={{
-          formatDurationSince,
           formatLogTimestamp,
           logEntryKey,
         }}
