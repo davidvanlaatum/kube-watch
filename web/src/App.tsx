@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import {
   Alert,
   Box,
@@ -13,6 +13,7 @@ import { DetailsDrawer } from './components/DetailsDrawer'
 import { ResourceFilters } from './components/ResourceFilters'
 import { ResourceTable } from './components/ResourceTable'
 import { useBackendLogs } from './hooks/useBackendLogs'
+import { useResourceStream } from './hooks/useResourceStream'
 import { useViewRoute } from './hooks/useViewRoute'
 import {
   cleanKubernetesObject,
@@ -93,7 +94,6 @@ export default function App() {
   const [now, setNow] = useState(Date.now())
   const [filters, setFilters] = useState<TableFilters>(emptyFilters)
   const [sort, setSort] = useState<SortState>(null)
-  const [items, setItems] = useState<Map<string, any>>(new Map())
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [detailsTab, setDetailsTab] = useState<DetailsTab>('yaml')
   const [showFullDetails, setShowFullDetails] = useState(false)
@@ -109,15 +109,44 @@ export default function App() {
   const [activeLogContainer, setActiveLogContainer] = useState<string>('')
   const [logTailLines, setLogTailLines] = useState(200)
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
-  const [isLoading, setIsLoading] = useState(false)
-  const [loadError, setLoadError] = useState<string | null>(null)
   const { logs: backendLogs, dismissLog: dismissBackendLog } = useBackendLogs()
-  const esRef = useRef<EventSource | null>(null)
   const eventsEsRef = useRef<EventSource | null>(null)
   const logsEsRef = useRef<EventSource | null>(null)
   const logDetailsRef = useRef<HTMLDivElement | null>(null)
   const detailsPanelRef = useRef<HTMLDivElement | null>(null)
   const [detailsOffset, setDetailsOffset] = useState(0)
+
+  const resetResourceViewState = useCallback(() => {
+    setFilters(emptyFilters)
+    setSelectedKey(null)
+    setDetailsTab('yaml')
+    setShowFullDetails(false)
+    setLogEntries([])
+    setLogsError(null)
+    setHelmHistory([])
+    setHelmHistoryError(null)
+    setHelmHistoryLoading(false)
+    setActiveLogContainer('')
+    setSort(null)
+  }, [])
+
+  const handleSelectedResourceDeleted = useCallback((key: string) => {
+    setSelectedKey(prev => {
+      if (prev === key) {
+        setShowFullDetails(false)
+        setDetailsTab('yaml')
+        setHelmHistory([])
+        setHelmHistoryError(null)
+        return null
+      }
+      return prev
+    })
+  }, [])
+
+  const { items, isLoading, loadError } = useResourceStream(ctx, resource, {
+    onReset: resetResourceViewState,
+    onSelectedDeleted: handleSelectedResourceDeleted,
+  })
 
   useEffect(() => {
     fetch('/api/contexts').then(r => r.json()).then(setContexts).catch(console.error)
@@ -136,83 +165,6 @@ export default function App() {
     const id = window.setInterval(() => setNow(Date.now()), 30_000)
     return () => window.clearInterval(id)
   }, [])
-
-  useEffect(() => {
-    if (!ctx) return
-    // close existing
-    if (esRef.current) {
-      esRef.current.close()
-      esRef.current = null
-    }
-    setItems(new Map())
-    setFilters(emptyFilters)
-    setSelectedKey(null)
-    setDetailsTab('yaml')
-    setShowFullDetails(false)
-    setLogEntries([])
-    setLogsError(null)
-    setHelmHistory([])
-    setHelmHistoryError(null)
-    setHelmHistoryLoading(false)
-    setActiveLogContainer('')
-    setSort(null)
-    setIsLoading(true)
-    setLoadError(null)
-    const url = `/sse/${encodeURIComponent(ctx)}/${encodeURIComponent(resource)}`
-    const es = new EventSource(url)
-    es.onmessage = (ev) => {
-      try {
-        const env: Envelope = JSON.parse(ev.data)
-        if (env.type === 'ADDED' || env.type === 'MODIFIED') {
-          setIsLoading(false)
-          setLoadError(null)
-          const uid = objectKey(env.object)
-          setItems(prev => {
-            const next = new Map(prev)
-            next.set(uid, env.object)
-            return next
-          })
-        } else if (env.type === 'DELETED') {
-          setIsLoading(false)
-          setLoadError(null)
-          const uid = objectKey(env.object)
-          setItems(prev => {
-            const next = new Map(prev)
-            next.delete(uid)
-            return next
-          })
-          setSelectedKey(prev => {
-            if (prev === uid) {
-              setShowFullDetails(false)
-              setDetailsTab('yaml')
-              setHelmHistory([])
-              setHelmHistoryError(null)
-              return null
-            }
-            return prev
-          })
-        } else if (env.type === 'SYNCED') {
-          setIsLoading(false)
-          setLoadError(null)
-        } else if (env.error) {
-          setIsLoading(false)
-          setLoadError(env.error)
-          console.warn('sse error', env)
-        }
-      } catch (e) {
-        console.warn('sse parse', e)
-      }
-    }
-    es.onerror = (e) => {
-      setLoadError('Connection interrupted; waiting for EventSource to reconnect')
-      console.warn('sse error', e)
-    }
-    esRef.current = es
-    return () => {
-      es.close()
-      esRef.current = null
-    }
-  }, [ctx, resource])
 
   const columns = columnsByResource[resource] || columnsByResource.pods
   const contextOptions = contextSelectOptions(contexts, ctx)
