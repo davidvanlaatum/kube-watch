@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Box, CircularProgress } from '@mui/material'
 import { BackendLogToasts } from './BackendLogToasts'
 import { DetailsDrawer } from './DetailsDrawer'
 import { ResourceFilters } from './ResourceFilters'
 import { ResourceTable } from './ResourceTable'
 import { useBackendLogs } from '../hooks/useBackendLogs'
+import { useDetailsPanelOffset } from '../hooks/useDetailsPanelOffset'
 import { useHelmHistory } from '../hooks/useHelmHistory'
 import { useResourceEvents } from '../hooks/useResourceEvents'
 import { useResourceLogs } from '../hooks/useResourceLogs'
@@ -41,8 +42,6 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
   const [showFullDetails, setShowFullDetails] = useState(false)
   const [logTailLines, setLogTailLines] = useState(200)
   const { logs: backendLogs, dismissLog: dismissBackendLog } = useBackendLogs()
-  const detailsPanelRef = useRef<HTMLDivElement | null>(null)
-  const [detailsOffset, setDetailsOffset] = useState(0)
 
   const resetResourceViewState = useCallback(() => {
     setFilters(emptyFilters)
@@ -109,28 +108,16 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
     tailLines: logTailLines,
   })
   const supportsHistory = Boolean(selectedItem && resource === 'helmreleases')
-
-  useEffect(() => {
-    if (!selectedItem || !detailsPanelRef.current) {
-      setDetailsOffset(0)
-      return
-    }
-
-    const updateDetailsOffset = () => {
-      const height = detailsPanelRef.current?.getBoundingClientRect().height || 0
-      setDetailsOffset(Math.ceil(height + 24))
-    }
-    updateDetailsOffset()
-
-    if (typeof ResizeObserver === 'function') {
-      const observer = new ResizeObserver(updateDetailsOffset)
-      observer.observe(detailsPanelRef.current)
-      return () => observer.disconnect()
-    }
-
-    window.addEventListener('resize', updateDetailsOffset)
-    return () => window.removeEventListener('resize', updateDetailsOffset)
-  }, [selectedItem, detailsTab, showFullDetails, helmHistory.length, helmHistoryLoading, logEntryCount, sortedSelectedEvents.length])
+  const { panelRef: detailsPanelRef, offset: detailsOffset } = useDetailsPanelOffset({
+    isOpen: Boolean(selectedItem),
+    selectionKey: selectedKey,
+    detailsTab,
+    showFullDetails,
+    historyLength: helmHistory.length,
+    historyLoading: helmHistoryLoading,
+    logEntryCount,
+    eventCount: sortedSelectedEvents.length,
+  })
 
   useEffect(() => {
     if (!showStatusFilter && filters.status) {
