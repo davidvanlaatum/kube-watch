@@ -494,6 +494,53 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'YAML' })).not.toBeInTheDocument()
   })
 
+  it('keeps details state synchronized with selection, close, and deletion actions', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<App />)
+
+    const [contextSelect] = await screen.findAllByRole('combobox')
+    await chooseOption(user, contextSelect, /dev/)
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    const resourceStream = MockEventSource.instances[0]
+
+    resourceStream.emit(podEvent('pod-1', 'api-7d9f'))
+    resourceStream.emit(podEvent('pod-2', 'worker-55f8'))
+    resourceStream.emit({ type: 'SYNCED' })
+
+    await user.click(await screen.findByRole('row', { name: /api-7d9f/ }))
+    await user.click(screen.getByRole('button', { name: 'Show full YAML' }))
+    expect(screen.getByRole('button', { name: 'Hide housekeeping' })).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Events' }))
+    expect(screen.getByRole('tab', { name: 'Events' })).toHaveAttribute('aria-selected', 'true')
+
+    await user.click(screen.getByRole('row', { name: /worker-55f8/ }))
+    expect(screen.getByRole('heading', { name: 'Pod/worker-55f8' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'YAML' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('button', { name: 'Show full YAML' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Events' }))
+    const deletedApi = podEvent('pod-1', 'api-7d9f')
+    deletedApi.type = 'DELETED'
+    resourceStream.emit(deletedApi)
+    expect(screen.getByRole('heading', { name: 'Pod/worker-55f8' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Events' })).toHaveAttribute('aria-selected', 'true')
+
+    await user.click(screen.getByRole('tab', { name: 'YAML' }))
+    await user.click(screen.getByRole('button', { name: 'Show full YAML' }))
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('tab', { name: 'YAML' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('row', { name: /worker-55f8/ }))
+    await user.click(screen.getByRole('tab', { name: 'Events' }))
+    const deletedWorker = podEvent('pod-2', 'worker-55f8')
+    deletedWorker.type = 'DELETED'
+    resourceStream.emit(deletedWorker)
+
+    await waitFor(() => {
+      expect(screen.queryByRole('tab', { name: 'YAML' })).not.toBeInTheDocument()
+    })
+  })
+
   it('shows last seen immediately for new events ahead of the cached clock tick', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     render(<App />)

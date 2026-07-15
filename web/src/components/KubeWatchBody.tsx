@@ -6,6 +6,7 @@ import { ResourceFilters } from './ResourceFilters'
 import { ResourceTable } from './ResourceTable'
 import { useBackendLogs } from '../hooks/useBackendLogs'
 import { useDetailsPanelOffset } from '../hooks/useDetailsPanelOffset'
+import { useDetailsState } from '../hooks/useDetailsState'
 import { useHelmHistory } from '../hooks/useHelmHistory'
 import { useResourceEvents } from '../hooks/useResourceEvents'
 import { useResourceLogs } from '../hooks/useResourceLogs'
@@ -37,30 +38,25 @@ type KubeWatchBodyProps = {
 export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
   const [filters, setFilters] = useState<TableFilters>(emptyFilters)
   const [sort, setSort] = useState<SortState>(null)
-  const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  const [detailsTab, setDetailsTab] = useState<DetailsTab>('yaml')
-  const [showFullDetails, setShowFullDetails] = useState(false)
   const [logTailLines, setLogTailLines] = useState(200)
   const { logs: backendLogs, dismissLog: dismissBackendLog } = useBackendLogs()
+  const {
+    selectedKey,
+    setSelectedKey,
+    detailsTab,
+    setDetailsTab,
+    showFullDetails,
+    setShowFullDetails,
+    resetDetailsView,
+    closeDetails,
+    handleSelectedResourceDeleted,
+  } = useDetailsState()
 
   const resetResourceViewState = useCallback(() => {
     setFilters(emptyFilters)
-    setSelectedKey(null)
-    setDetailsTab('yaml')
-    setShowFullDetails(false)
+    closeDetails()
     setSort(null)
-  }, [])
-
-  const handleSelectedResourceDeleted = useCallback((key: string) => {
-    setSelectedKey(prev => {
-      if (prev === key) {
-        setShowFullDetails(false)
-        setDetailsTab('yaml')
-        return null
-      }
-      return prev
-    })
-  }, [])
+  }, [closeDetails])
 
   const { items, isLoading, loadError } = useResourceStream(ctx, resource, {
     onReset: resetResourceViewState,
@@ -157,10 +153,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
         nextSort={nextSort}
         onSortChange={setSort}
         onSelectKey={setSelectedKey}
-        onSelectionChanged={() => {
-          setShowFullDetails(false)
-          setDetailsTab('yaml')
-        }}
+        onSelectionChanged={resetDetailsView}
       />
       <DetailsDrawer
         selection={{
@@ -169,11 +162,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
           resource,
           detailsItem,
           panelRef: detailsPanelRef,
-          onClose: () => {
-            setSelectedKey(null)
-            setShowFullDetails(false)
-            setDetailsTab('yaml')
-          },
+          onClose: closeDetails,
         }}
         tabs={{
           active: detailsTab,
