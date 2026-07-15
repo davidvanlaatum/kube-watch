@@ -8,16 +8,7 @@ import {
   TableRow,
   TableSortLabel,
 } from '@mui/material'
-import type { ReactNode } from 'react'
-
-type Column = {
-  header: string
-  value: (object: any, now: number) => ReactNode
-  align?: 'left' | 'center' | 'right'
-  sortValue?: (object: any) => string | number
-}
-type SortDirection = 'asc' | 'desc'
-type SortState = { header: string; direction: SortDirection } | null
+import type { Column, SortState } from '../types'
 
 type ResourceTableProps = {
   columns: Column[]

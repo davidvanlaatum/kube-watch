@@ -23,15 +23,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close'
 import { stringify } from 'yaml'
 import type { RefObject } from 'react'
-
-type DetailsTab = 'yaml' | 'events' | 'logs' | 'history'
-type LogEntry = { pod: string; container: string; timestamp: string; line: string; seq: number }
-type Column = {
-  header: string
-  value: (object: any, now: number) => React.ReactNode
-  align?: 'left' | 'center' | 'right'
-  sortValue?: (object: any) => string | number
-}
+import type { Column, DetailsTab, LogEntry } from '../types'
 
 type DetailsDrawerProps = {
   selectedItem: any

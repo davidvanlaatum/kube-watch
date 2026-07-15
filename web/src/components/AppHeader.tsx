@@ -11,17 +11,8 @@ import {
   Toolbar,
   Typography,
 } from '@mui/material'
-
-type ContextInfo = { name: string; namespace: string }
-type VersionInfo = {
-  version: string
-  commit: string
-  date: string
-  latestVersion?: string
-  latestUrl?: string
-  updateAvailable: boolean
-  checkError?: string
-}
+import { resourceOptions } from '../resources'
+import type { ContextInfo, VersionInfo } from '../types'
 
 type AppHeaderProps = {
   versionInfo: VersionInfo | null
@@ -32,24 +23,6 @@ type AppHeaderProps = {
   onContextChange: (context: string) => void
   onResourceChange: (resource: string) => void
 }
-
-const resourceOptions = [
-  'pods',
-  'deployments',
-  'statefulsets',
-  'replicasets',
-  'services',
-  'jobs',
-  'cronjobs',
-  'hpas',
-  'configmaps',
-  'secrets',
-  'serviceaccounts',
-  'poddisruptionbudgets',
-  'networkpolicies',
-  'events',
-  'helmreleases',
-]
 
 export function AppHeader({
   versionInfo,

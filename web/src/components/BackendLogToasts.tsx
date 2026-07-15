@@ -1,6 +1,5 @@
 import { Alert, Stack, useTheme } from '@mui/material'
-
-type BackendLogEntry = { id: string; message: string; time: string; count: number }
+import type { BackendLogEntry } from '../types'
 
 type BackendLogToastsProps = {
   logs: BackendLogEntry[]

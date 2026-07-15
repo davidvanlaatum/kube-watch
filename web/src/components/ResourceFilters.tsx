@@ -12,14 +12,7 @@ import {
   Stack,
   TextField,
 } from '@mui/material'
-
-type TableFilters = {
-  name: string
-  status: string
-  labels: string
-  podRestartsOnly: boolean
-  notReadyOnly: boolean
-}
+import type { TableFilters } from '../types'
 
 type ResourceFiltersProps = {
   resource: string
