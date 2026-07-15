@@ -14,6 +14,7 @@ import { ResourceFilters } from './components/ResourceFilters'
 import { ResourceTable } from './components/ResourceTable'
 import { useBackendLogs } from './hooks/useBackendLogs'
 import { useHelmHistory } from './hooks/useHelmHistory'
+import { useResourceEvents } from './hooks/useResourceEvents'
 import { useResourceStream } from './hooks/useResourceStream'
 import { useViewRoute } from './hooks/useViewRoute'
 import {
@@ -21,7 +22,6 @@ import {
   columnsByResource,
   contextSelectOptions,
   emptyFilters,
-  eventMatchesResource,
   eventSupportedResources,
   formatDurationSince,
   formatLogTimestamp,
@@ -41,7 +41,6 @@ import {
 import type {
   ContextInfo,
   DetailsTab,
-  Envelope,
   LogEntry,
   LogEnvelope,
   SortState,
@@ -98,9 +97,6 @@ export default function App() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [detailsTab, setDetailsTab] = useState<DetailsTab>('yaml')
   const [showFullDetails, setShowFullDetails] = useState(false)
-  const [selectedEvents, setSelectedEvents] = useState<Map<string, any>>(new Map())
-  const [eventsLoading, setEventsLoading] = useState(false)
-  const [eventsError, setEventsError] = useState<string | null>(null)
   const [logEntries, setLogEntries] = useState<LogEntry[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
   const [logsError, setLogsError] = useState<string | null>(null)
@@ -108,7 +104,6 @@ export default function App() {
   const [logTailLines, setLogTailLines] = useState(200)
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const { logs: backendLogs, dismissLog: dismissBackendLog } = useBackendLogs()
-  const eventsEsRef = useRef<EventSource | null>(null)
   const logsEsRef = useRef<EventSource | null>(null)
   const logDetailsRef = useRef<HTMLDivElement | null>(null)
   const detailsPanelRef = useRef<HTMLDivElement | null>(null)
@@ -175,9 +170,13 @@ export default function App() {
   } = useHelmHistory(ctx, resource, selectedItem, detailsTab)
   const detailsItem = selectedItem && (showFullDetails ? selectedItem : cleanKubernetesObject(selectedItem))
   const supportsEvents = Boolean(selectedItem && eventSupportedResources.has(resource))
+  const {
+    sortedEvents: sortedSelectedEvents,
+    loading: eventsLoading,
+    error: eventsError,
+  } = useResourceEvents(ctx, resource, selectedItem, supportsEvents)
   const supportsLogs = Boolean(selectedItem && logSupportedResources.has(resource))
   const supportsHistory = Boolean(selectedItem && resource === 'helmreleases')
-  const sortedSelectedEvents = sortItems('events', [...selectedEvents.values()], null)
   const selectedName = selectedItem?.metadata?.name || ''
   const selectedNamespace = selectedItem?.metadata?.namespace || ''
   const logContainers = useMemo(
@@ -223,79 +222,6 @@ export default function App() {
       setFilters(prev => ({ ...prev, status: '' }))
     }
   }, [filters.status, showStatusFilter])
-
-  useEffect(() => {
-    if (eventsEsRef.current) {
-      eventsEsRef.current.close()
-      eventsEsRef.current = null
-    }
-    setSelectedEvents(new Map())
-    setEventsError(null)
-
-    if (!ctx || !selectedItem || !supportsEvents) {
-      setEventsLoading(false)
-      return
-    }
-
-    setEventsLoading(true)
-    const selected = selectedItem
-    const es = new EventSource(`/sse/${encodeURIComponent(ctx)}/events`)
-    const emptyEventsTimer = window.setTimeout(() => {
-      setEventsLoading(false)
-    }, 2500)
-    es.onmessage = (ev) => {
-      try {
-        const env: Envelope = JSON.parse(ev.data)
-        if (env.type === 'SYNCED') {
-          window.clearTimeout(emptyEventsTimer)
-          setEventsLoading(false)
-          return
-        }
-        if (env.error) {
-          window.clearTimeout(emptyEventsTimer)
-          setEventsLoading(false)
-          setEventsError(env.error)
-          return
-        }
-        if (!env.object || !eventMatchesResource(env.object, selected, resource)) {
-          return
-        }
-        window.clearTimeout(emptyEventsTimer)
-        setEventsLoading(false)
-        setEventsError(null)
-        const uid = objectKey(env.object)
-        if (env.type === 'DELETED') {
-          setSelectedEvents(prev => {
-            const next = new Map(prev)
-            next.delete(uid)
-            return next
-          })
-          return
-        }
-        if (env.type === 'ADDED' || env.type === 'MODIFIED') {
-          setSelectedEvents(prev => {
-            const next = new Map(prev)
-            next.set(uid, env.object)
-            return next
-          })
-        }
-      } catch (e) {
-        console.warn('event stream parse', e)
-      }
-    }
-    es.onerror = (e) => {
-      window.clearTimeout(emptyEventsTimer)
-      setEventsLoading(false)
-      setEventsError('Event stream interrupted; waiting for EventSource to reconnect')
-      console.warn('event stream error', e)
-    }
-    eventsEsRef.current = es
-    return () => {
-      window.clearTimeout(emptyEventsTimer)
-      es.close()
-      eventsEsRef.current = null
-    }
-  }, [ctx, resource, selectedItem, supportsEvents])
 
   useEffect(() => {
     if (!logContainers.includes(activeLogContainer)) {
