@@ -38,6 +38,11 @@ import {
 import CloseIcon from '@mui/icons-material/Close'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { stringify } from 'yaml'
+import { AppHeader } from './components/AppHeader'
+import { BackendLogToasts } from './components/BackendLogToasts'
+import { DetailsDrawer } from './components/DetailsDrawer'
+import { ResourceFilters } from './components/ResourceFilters'
+import { ResourceTable } from './components/ResourceTable'
 
 type ContextInfo = { name: string; namespace: string }
 type VersionInfo = {
@@ -1154,425 +1159,95 @@ export default function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box className="app" sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-        <AppBar position="static" color="default" elevation={1}>
-          <Toolbar sx={{ gap: 2, alignItems: { xs: 'stretch', sm: 'center' }, flexDirection: { xs: 'column', sm: 'row' }, py: { xs: 1, sm: 0 } }}>
-            <Box sx={{ flex: 1, display: 'flex', alignItems: 'baseline', gap: 1.5 }}>
-              <Typography variant="h6" component="h1">kube-watch</Typography>
-              {versionInfo && (
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                  <Chip size="small" label={versionLabel(versionInfo.version)} />
-                  {versionInfo.updateAvailable && versionInfo.latestVersion && versionInfo.latestUrl && (
-                    <Link href={versionInfo.latestUrl} target="_blank" rel="noreferrer" sx={{ fontSize: 13, fontWeight: 700 }}>
-                      Update available: {versionInfo.latestVersion}
-                    </Link>
-                  )}
-                </Stack>
-              )}
-            </Box>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ minWidth: { sm: 420 } }}>
-              <FormControl size="small" fullWidth>
-                <InputLabel id="context-select-label">Context</InputLabel>
-                <Select
-                  labelId="context-select-label"
-                  id="context-select"
-                  label="Context"
-                  value={ctx}
-                  onChange={e => setCtx(e.target.value)}
-                >
-                  <MenuItem value=""><em>Select context</em></MenuItem>
-                  {contextOptions.map(c => <MenuItem key={c.name} value={c.name}>{c.name} ({c.namespace})</MenuItem>)}
-                </Select>
-              </FormControl>
-              <FormControl size="small" fullWidth>
-                <InputLabel id="resource-select-label">Resource</InputLabel>
-                <Select
-                  labelId="resource-select-label"
-                  id="resource-select"
-                  label="Resource"
-                  value={resource}
-                  onChange={e => setResource(e.target.value)}
-                >
-                  <MenuItem value="pods">pods</MenuItem>
-                  <MenuItem value="deployments">deployments</MenuItem>
-                  <MenuItem value="statefulsets">statefulsets</MenuItem>
-                  <MenuItem value="replicasets">replicasets</MenuItem>
-                  <MenuItem value="services">services</MenuItem>
-                  <MenuItem value="jobs">jobs</MenuItem>
-                  <MenuItem value="cronjobs">cronjobs</MenuItem>
-                  <MenuItem value="hpas">hpas</MenuItem>
-                  <MenuItem value="configmaps">configmaps</MenuItem>
-                  <MenuItem value="secrets">secrets</MenuItem>
-                  <MenuItem value="serviceaccounts">serviceaccounts</MenuItem>
-                  <MenuItem value="poddisruptionbudgets">poddisruptionbudgets</MenuItem>
-                  <MenuItem value="networkpolicies">networkpolicies</MenuItem>
-                  <MenuItem value="events">events</MenuItem>
-                  <MenuItem value="helmreleases">helmreleases</MenuItem>
-                </Select>
-              </FormControl>
-            </Stack>
-          </Toolbar>
-        </AppBar>
+        <AppHeader
+          versionInfo={versionInfo}
+          versionLabel={versionLabel}
+          contexts={contextOptions}
+          ctx={ctx}
+          resource={resource}
+          onContextChange={setCtx}
+          onResourceChange={setResource}
+        />
         <Box component="main" className={selectedItem ? 'has-details' : undefined} sx={{ p: 2, pb: selectedItem ? `${detailsOffset + 16}px` : 2 }}>
           {isLoading && (
             <Alert icon={<CircularProgress size={16} />} severity="info" role="status" sx={{ mb: 2 }}>
               Loading {resource}...
             </Alert>
           )}
-          {backendLogs.length > 0 && (
-            <Stack
-              spacing={1}
-              role="status"
-              aria-live="polite"
-              sx={{
-                position: 'fixed',
-                top: 16,
-                right: 16,
-                zIndex: theme.zIndex.snackbar,
-                maxWidth: 560,
-                width: 'min(560px, calc(100vw - 32px))',
-              }}
-            >
-              {backendLogs.map(entry => (
-                <Alert
-                  key={entry.id}
-                  severity="error"
-                  variant="filled"
-                  elevation={6}
-                  onClose={() => dismissBackendLog(entry.id)}
-                >
-                  {entry.message}{entry.count > 1 ? ` (${entry.count}x)` : ''}
-                </Alert>
-              ))}
-            </Stack>
-          )}
+          <BackendLogToasts logs={backendLogs} onDismiss={dismissBackendLog} />
           {loadError && !isLoading && <Alert severity="error" sx={{ mb: 2 }}>{loadError}</Alert>}
-          <Paper component="section" aria-label="Table filters" variant="outlined" sx={{ mb: 2, p: 1.5 }}>
-            <Stack direction="row" useFlexGap spacing={1.5} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
-              <TextField
-                label="Name contains"
-                type="search"
-                size="small"
-                value={filters.name}
-                onChange={event => setFilters(prev => ({ ...prev, name: event.target.value }))}
-                placeholder="api"
-              />
-              {showStatusFilter && (
-                <FormControl size="small" sx={{ minWidth: 180 }}>
-                  <InputLabel id="status-filter-label">Status equals</InputLabel>
-                  <Select
-                    labelId="status-filter-label"
-                    id="status-filter"
-                    label="Status equals"
-                    value={filters.status}
-                    onChange={event => setFilters(prev => ({ ...prev, status: event.target.value }))}
-                  >
-                    <MenuItem value=""><em>Any status</em></MenuItem>
-                    {statusFilterSuggestions.map(status => (
-                      <MenuItem key={status} value={status}>{status}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              )}
-              <Autocomplete
-                freeSolo
-                openOnFocus
-                options={labelFilterSuggestions}
-                value={filters.labels}
-                inputValue={filters.labels}
-                onInputChange={(_, value) => setFilters(prev => ({ ...prev, labels: value }))}
-                onChange={(_, value) => {
-                  if (typeof value === 'string') {
-                    setFilters(prev => ({ ...prev, labels: value }))
-                  }
-                }}
-                sx={{ minWidth: 340 }}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Labels"
-                    type="search"
-                    size="small"
-                    placeholder="app.kubernetes.io/name: simtool-api"
-                  />
-                )}
-              />
-              {resource === 'pods' && (
-                <FormControlLabel
-                  control={(
-                    <Checkbox
-                      checked={filters.podRestartsOnly}
-                      onChange={event => setFilters(prev => ({ ...prev, podRestartsOnly: event.target.checked }))}
-                    />
-                  )}
-                  label="Restarts > 0"
-                />
-              )}
-              {(resource === 'pods' || resource === 'deployments' || resource === 'statefulsets') && (
-                <FormControlLabel
-                  control={(
-                    <Checkbox
-                      checked={filters.notReadyOnly}
-                      onChange={event => setFilters(prev => ({ ...prev, notReadyOnly: event.target.checked }))}
-                    />
-                  )}
-                  label="Not ready"
-                />
-              )}
-              {hasActiveFilters(filters) && (
-                <Button type="button" variant="outlined" onClick={() => setFilters(emptyFilters)}>
-                  Clear filters
-                </Button>
-              )}
-              <Chip size="small" variant="outlined" label={`${sortedItems.length}/${allItems.length} shown`} sx={{ ml: 'auto' }} />
-            </Stack>
-          </Paper>
-          <TableContainer
-            component={Paper}
-            variant="outlined"
-            className="resource-table"
-            sx={{ maxHeight: selectedItem ? `max(180px, calc(100vh - 190px - ${detailsOffset}px))` : 'calc(100vh - 190px)' }}
-          >
-            <Table size="small" stickyHeader>
-              <TableHead>
-                <TableRow>
-                  {columns.map(column => {
-                    const active = sort?.header === column.header
-                    return (
-                      <TableCell key={column.header} align={column.align} sortDirection={active ? sort.direction : false}>
-                        <TableSortLabel
-                          active={active}
-                          direction={active ? sort.direction : 'asc'}
-                          onClick={() => setSort(prev => nextSort(prev, column.header))}
-                        >
-                          {column.header}
-                        </TableSortLabel>
-                      </TableCell>
-                    )
-                  })}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {sortedItems.map((o: any) => {
-                  const key = objectKey(o)
-                  return (
-                    <TableRow
-                      key={key}
-                      selected={selectedKey === key}
-                      hover
-                      sx={{ cursor: 'pointer' }}
-                      onClick={() => setSelectedKey(prev => {
-                        const next = prev === key ? null : key
-                        if (next !== prev) {
-                          setShowFullDetails(false)
-                          setDetailsTab('yaml')
-                          setLogEntries([])
-                          setLogsError(null)
-                          setHelmHistory([])
-                          setHelmHistoryError(null)
-                          setActiveLogContainer('')
-                        }
-                        return next
-                      })}
-                    >
-                      {columns.map(column => <TableCell key={column.header} align={column.align}>{column.value(o, now)}</TableCell>)}
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-          <Drawer
-            anchor="bottom"
-            open={Boolean(selectedItem)}
-            variant="persistent"
-            slotProps={{
-              paper: {
-                ref: detailsPanelRef,
-                className: 'details-panel',
-                sx: {
-                  right: 12,
-                  bottom: 12,
-                  left: 12,
-                  width: 'auto',
-                  maxHeight: '42vh',
-                  borderRadius: 2,
-                  overflow: 'hidden',
-                },
-              },
+          <ResourceFilters
+            resource={resource}
+            filters={filters}
+            showStatusFilter={showStatusFilter}
+            statusFilterSuggestions={statusFilterSuggestions}
+            labelFilterSuggestions={labelFilterSuggestions}
+            shownCount={sortedItems.length}
+            totalCount={allItems.length}
+            hasActiveFilters={hasActiveFilters(filters)}
+            onFiltersChange={setFilters}
+            onClearFilters={() => setFilters(emptyFilters)}
+          />
+          <ResourceTable
+            columns={columns}
+            items={sortedItems}
+            now={now}
+            selectedKey={selectedKey}
+            detailsOffset={detailsOffset}
+            hasSelectedItem={Boolean(selectedItem)}
+            sort={sort}
+            objectKey={objectKey}
+            nextSort={nextSort}
+            onSortChange={setSort}
+            onSelectKey={setSelectedKey}
+            onSelectionChanged={() => {
+              setShowFullDetails(false)
+              setDetailsTab('yaml')
+              setLogEntries([])
+              setLogsError(null)
+              setHelmHistory([])
+              setHelmHistoryError(null)
+              setActiveLogContainer('')
             }}
-          >
-            {selectedItem && (
-              <Box component="section" aria-label="Selected resource details">
-              <Box className="details-header">
-                <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 700 }}>
-                  {selectedItem.kind || resource}/{selectedItem.metadata?.name || selectedKey}
-                </Typography>
-                <Stack direction="row" spacing={1}>
-                  {detailsTab === 'yaml' && (
-                    <Button size="small" variant="outlined" type="button" onClick={() => setShowFullDetails(prev => !prev)}>
-                      {showFullDetails ? 'Hide housekeeping' : 'Show full YAML'}
-                    </Button>
-                  )}
-                  <Tooltip title="Close details">
-                    <IconButton size="small" type="button" aria-label="Close" onClick={() => {
-                      setSelectedKey(null)
-                      setShowFullDetails(false)
-                      setDetailsTab('yaml')
-                    }}>
-                      <CloseIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </Stack>
-              </Box>
-              <Tabs value={detailsTab} onChange={(_, value: DetailsTab) => setDetailsTab(value)} sx={{ px: 1.5 }}>
-                <Tab value="yaml" label="YAML" />
-                {supportsEvents && <Tab value="events" label="Events" />}
-                {supportsLogs && <Tab value="logs" label="Logs" />}
-                {supportsHistory && <Tab value="history" label="History" />}
-              </Tabs>
-              {detailsTab === 'yaml' && <pre>{stringify(detailsItem)}</pre>}
-              {detailsTab === 'history' && supportsHistory && (
-                <Box className="event-details">
-                  {helmHistoryLoading && (
-                    <Alert icon={<CircularProgress size={16} />} severity="info" className="inline-status">
-                      Loading history...
-                    </Alert>
-                  )}
-                  {helmHistoryError && <Alert severity="error" className="inline-error">{helmHistoryError}</Alert>}
-                  {!helmHistoryLoading && helmHistory.length === 0 && !helmHistoryError && (
-                    <Alert severity="info" className="empty-state">No history found for this release.</Alert>
-                  )}
-                  {helmHistory.length > 0 && (
-                    <TableContainer component={Paper} sx={{ border: 1, borderColor: 'divider', maxHeight: '28vh' }}>
-                      <Table size="small" stickyHeader>
-                        <TableHead>
-                          <TableRow>
-                            <TableCell align="right">REVISION</TableCell>
-                            <TableCell>STATUS</TableCell>
-                            <TableCell>CHART</TableCell>
-                            <TableCell>APP VERSION</TableCell>
-                            <TableCell align="right">UPDATED</TableCell>
-                            <TableCell>DESCRIPTION</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {helmHistory.map((revision: any) => (
-                            <TableRow key={revision.revision}>
-                              <TableCell align="right">{revision.revision}</TableCell>
-                              <TableCell>{revision.status || ''}</TableCell>
-                              <TableCell>{[revision.chart, revision.version].filter(Boolean).join('-')}</TableCell>
-                              <TableCell>{revision.appVersion || ''}</TableCell>
-                              <TableCell align="right">{formatDurationSince(revision.updated, now)}</TableCell>
-                              <TableCell>{revision.description || ''}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  )}
-                </Box>
-              )}
-              {detailsTab === 'events' && supportsEvents && (
-                <Box className="event-details">
-                  {eventsLoading && (
-                    <Alert icon={<CircularProgress size={16} />} severity="info" className="inline-status">
-                      Loading events...
-                    </Alert>
-                  )}
-                  {eventsError && <Alert severity="error" className="inline-error">{eventsError}</Alert>}
-                  {!eventsLoading && sortedSelectedEvents.length === 0 && !eventsError && (
-                    <Alert severity="info" className="empty-state">No events found for this resource.</Alert>
-                  )}
-                  {sortedSelectedEvents.length > 0 && (
-                    <TableContainer component={Paper} sx={{ border: 1, borderColor: 'divider', maxHeight: '28vh' }}>
-                      <Table size="small" stickyHeader>
-                        <TableHead>
-                          <TableRow>
-                            {columnsByResource.events.map(column => (
-                              <TableCell key={column.header} align={column.align}>{column.header}</TableCell>
-                            ))}
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {sortedSelectedEvents.map((event: any) => (
-                            <TableRow key={objectKey(event)}>
-                              {columnsByResource.events.map(column => (
-                                <TableCell key={column.header} align={column.align}>{column.value(event, now)}</TableCell>
-                              ))}
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  )}
-                </Box>
-              )}
-              {detailsTab === 'logs' && supportsLogs && (
-                <Box ref={logDetailsRef} className="log-details">
-                  <Box className="log-controls">
-                    <Stack direction="row" spacing={1.5} className="log-options" sx={{ alignItems: 'center' }}>
-                      <TextField
-                        label="Tail lines"
-                        type="number"
-                        size="small"
-                        value={logTailLines}
-                        slotProps={{ htmlInput: { min: 0, max: 5000 } }}
-                        onChange={(event) => {
-                          const next = Number.parseInt(event.target.value, 10)
-                          if (Number.isFinite(next)) {
-                            setLogTailLines(Math.max(0, Math.min(5000, next)))
-                          }
-                        }}
-                        sx={{ width: 120 }}
-                      />
-                      <Chip size="small" label="Live follow" />
-                      <Button size="small" variant="outlined" type="button" onClick={() => setAutoScrollLogs(prev => !prev)}>
-                        Auto scroll {autoScrollLogs ? 'on' : 'off'}
-                      </Button>
-                    </Stack>
-                    {logContainers.length > 0 && (
-                      <Tabs
-                        className="container-tabs"
-                        value={activeLogContainer}
-                        onChange={(_, value: string) => setActiveLogContainer(value)}
-                        variant="scrollable"
-                        scrollButtons="auto"
-                        aria-label="Log containers"
-                      >
-                        {logContainers.map(container => (
-                          <Tab key={container} value={container} label={container} />
-                        ))}
-                      </Tabs>
-                    )}
-                  </Box>
-                  {logsLoading && (
-                    <Alert icon={<CircularProgress size={16} />} severity="info" className="inline-status">
-                      Loading logs...
-                    </Alert>
-                  )}
-                  {logsError && <Alert severity="error" className="inline-error">{logsError}</Alert>}
-                  {!logsLoading && !logsError && logContainers.length === 0 && (
-                    <Alert severity="info" className="empty-state">No containers found for this {resource === 'pods' ? 'pod' : 'deployment'}.</Alert>
-                  )}
-                  {!logsLoading && !logsError && logContainers.length > 0 && sortedLogEntries.length === 0 && (
-                    <Alert severity="info" className="empty-state">Waiting for log lines for container {activeLogContainer}...</Alert>
-                  )}
-                  {sortedLogEntries.length > 0 && (
-                    <Box className="log-output" aria-label={`Logs for ${activeLogContainer}`}>
-                      {sortedLogEntries.map(entry => (
-                        <Box key={logEntryKey(entry)} className="log-line">
-                          <span className="log-time">{formatLogTimestamp(entry.timestamp)} </span>
-                          <span className="log-pod">{entry.pod}: </span>
-                          <span className="log-message">{entry.line}</span>
-                        </Box>
-                      ))}
-                    </Box>
-                  )}
-                </Box>
-              )}
-              </Box>
-            )}
-          </Drawer>
+          />
+          <DetailsDrawer
+            selectedItem={selectedItem}
+            selectedKey={selectedKey}
+            resource={resource}
+            detailsItem={detailsItem}
+            detailsPanelRef={detailsPanelRef}
+            detailsTab={detailsTab}
+            setDetailsTab={setDetailsTab}
+            showFullDetails={showFullDetails}
+            setShowFullDetails={setShowFullDetails}
+            setSelectedKey={setSelectedKey}
+            supportsEvents={supportsEvents}
+            supportsLogs={supportsLogs}
+            supportsHistory={supportsHistory}
+            now={now}
+            columnsByResource={columnsByResource}
+            objectKey={objectKey}
+            sortedSelectedEvents={sortedSelectedEvents}
+            eventsLoading={eventsLoading}
+            eventsError={eventsError}
+            helmHistory={helmHistory}
+            helmHistoryLoading={helmHistoryLoading}
+            helmHistoryError={helmHistoryError}
+            logDetailsRef={logDetailsRef}
+            logTailLines={logTailLines}
+            setLogTailLines={setLogTailLines}
+            autoScrollLogs={autoScrollLogs}
+            setAutoScrollLogs={setAutoScrollLogs}
+            logContainers={logContainers}
+            activeLogContainer={activeLogContainer}
+            setActiveLogContainer={setActiveLogContainer}
+            logsLoading={logsLoading}
+            logsError={logsError}
+            sortedLogEntries={sortedLogEntries}
+            formatDurationSince={formatDurationSince}
+            formatLogTimestamp={formatLogTimestamp}
+            logEntryKey={logEntryKey}
+          />
         </Box>
       </Box>
     </ThemeProvider>
