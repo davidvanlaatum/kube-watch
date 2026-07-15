@@ -12,6 +12,8 @@ import { BackendLogToasts } from './components/BackendLogToasts'
 import { DetailsDrawer } from './components/DetailsDrawer'
 import { ResourceFilters } from './components/ResourceFilters'
 import { ResourceTable } from './components/ResourceTable'
+import { useBackendLogs } from './hooks/useBackendLogs'
+import { useViewRoute } from './hooks/useViewRoute'
 import {
   cleanKubernetesObject,
   columnsByResource,
@@ -34,10 +36,7 @@ import {
   supportsStatusFilter,
   versionLabel,
 } from './resources'
-import { currentViewRoute, viewRoutePath } from './routing'
 import type {
-  BackendLogEntry,
-  BackendLogEnvelope,
   ContextInfo,
   DetailsTab,
   Envelope,
@@ -87,14 +86,10 @@ const theme = createTheme({
   },
 })
 
-const backendLogDisplayMillis = 12_000
-
 export default function App() {
-  const initialRoute = currentViewRoute()
+  const { ctx, setCtx, resource, setResource } = useViewRoute()
   const [contexts, setContexts] = useState<ContextInfo[]>([])
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null)
-  const [ctx, setCtx] = useState<string>(initialRoute.ctx)
-  const [resource, setResource] = useState<string>(initialRoute.resource)
   const [now, setNow] = useState(Date.now())
   const [filters, setFilters] = useState<TableFilters>(emptyFilters)
   const [sort, setSort] = useState<SortState>(null)
@@ -116,41 +111,13 @@ export default function App() {
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [backendLogs, setBackendLogs] = useState<BackendLogEntry[]>([])
+  const { logs: backendLogs, dismissLog: dismissBackendLog } = useBackendLogs()
   const esRef = useRef<EventSource | null>(null)
-  const backendLogsEsRef = useRef<EventSource | null>(null)
-  const backendLogTimersRef = useRef<Map<string, number>>(new Map())
   const eventsEsRef = useRef<EventSource | null>(null)
   const logsEsRef = useRef<EventSource | null>(null)
   const logDetailsRef = useRef<HTMLDivElement | null>(null)
   const detailsPanelRef = useRef<HTMLDivElement | null>(null)
-  const routeSyncReadyRef = useRef(false)
-  const handlingPopStateRef = useRef(false)
   const [detailsOffset, setDetailsOffset] = useState(0)
-
-  useEffect(() => {
-    const onPopState = () => {
-      const next = currentViewRoute()
-      handlingPopStateRef.current = true
-      setCtx(next.ctx)
-      setResource(next.resource)
-    }
-    window.addEventListener('popstate', onPopState)
-    return () => window.removeEventListener('popstate', onPopState)
-  }, [])
-
-  useEffect(() => {
-    const nextPath = viewRoutePath(ctx, resource)
-    if (window.location.pathname !== nextPath) {
-      if (routeSyncReadyRef.current && !handlingPopStateRef.current) {
-        window.history.pushState(null, '', nextPath)
-      } else {
-        window.history.replaceState(null, '', nextPath)
-      }
-    }
-    routeSyncReadyRef.current = true
-    handlingPopStateRef.current = false
-  }, [ctx, resource])
 
   useEffect(() => {
     fetch('/api/contexts').then(r => r.json()).then(setContexts).catch(console.error)
@@ -169,61 +136,6 @@ export default function App() {
     const id = window.setInterval(() => setNow(Date.now()), 30_000)
     return () => window.clearInterval(id)
   }, [])
-
-  useEffect(() => {
-    const es = new EventSource('/api/backend-logs')
-    es.onmessage = (ev) => {
-      try {
-        const env: BackendLogEnvelope = JSON.parse(ev.data)
-        if (env.type !== 'BACKEND_LOG' || !env.error) return
-        const message = env.error
-        const time = env.log?.time || new Date().toISOString()
-        const id = message
-        setBackendLogs(prev => {
-          const existing = prev.find(entry => entry.id === id)
-          if (existing) {
-            return [
-              { ...existing, time, count: existing.count + 1 },
-              ...prev.filter(entry => entry.id !== id),
-            ].slice(0, 5)
-          }
-          return [{ id, message, time, count: 1 }, ...prev].slice(0, 5)
-        })
-        const existingTimer = backendLogTimersRef.current.get(id)
-        if (existingTimer !== undefined) {
-          window.clearTimeout(existingTimer)
-        }
-        const timer = window.setTimeout(() => {
-          setBackendLogs(prev => prev.filter(entry => entry.id !== id))
-          backendLogTimersRef.current.delete(id)
-        }, backendLogDisplayMillis)
-        backendLogTimersRef.current.set(id, timer)
-      } catch (error) {
-        console.warn('backend log stream parse', error)
-      }
-    }
-    es.onerror = (error) => {
-      console.warn('backend log stream error', error)
-    }
-    backendLogsEsRef.current = es
-    return () => {
-      es.close()
-      backendLogsEsRef.current = null
-      for (const timer of backendLogTimersRef.current.values()) {
-        window.clearTimeout(timer)
-      }
-      backendLogTimersRef.current.clear()
-    }
-  }, [])
-
-  const dismissBackendLog = (id: string) => {
-    const timer = backendLogTimersRef.current.get(id)
-    if (timer !== undefined) {
-      window.clearTimeout(timer)
-      backendLogTimersRef.current.delete(id)
-    }
-    setBackendLogs(prev => prev.filter(entry => entry.id !== id))
-  }
 
   useEffect(() => {
     if (!ctx) return
