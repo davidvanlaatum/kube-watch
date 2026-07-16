@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { logContainerNames, logEntryKey } from '../resources'
+import { logContainerNames, logEntryKey } from '../resourceUtils'
 import type { DetailsTab, LogEntry, LogEnvelope } from '../types'
 
 type ResourceLogsOptions = {

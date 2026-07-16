@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { eventMatchesResource, objectKey, sortItems } from '../resources'
+import { sortItems } from '../resourceSort'
+import { eventMatchesResource, objectKey } from '../resourceUtils'
 import type { Envelope } from '../types'
 
 export function useResourceEvents(ctx: string, resource: string, selectedItem: any, supportsEvents: boolean) {

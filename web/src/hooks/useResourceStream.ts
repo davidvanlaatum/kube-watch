@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { objectKey } from '../resources'
+import { objectKey } from '../resourceUtils'
 import type { Envelope } from '../types'
 
 type ResourceStreamOptions = {

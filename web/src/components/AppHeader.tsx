@@ -11,7 +11,7 @@ import {
   Toolbar,
   Typography,
 } from '@mui/material'
-import { resourceOptions } from '../resources'
+import { resourceOptions } from '../resourceRegistry'
 import type { ContextInfo, VersionInfo } from '../types'
 
 type AppHeaderProps = {

@@ -11,21 +11,10 @@ import { useHelmHistory } from '../hooks/useHelmHistory'
 import { useResourceEvents } from '../hooks/useResourceEvents'
 import { useResourceLogs } from '../hooks/useResourceLogs'
 import { useResourceStream } from '../hooks/useResourceStream'
-import {
-  cleanKubernetesObject,
-  emptyFilters,
-  formatLogTimestamp,
-  hasActiveFilters,
-  labelSuggestions,
-  logEntryKey,
-  matchesFilters,
-  nextSort,
-  objectKey,
-  resourceDefinition,
-  resourceRegistry,
-  sortItems,
-  statusSuggestions,
-} from '../resources'
+import { emptyFilters, hasActiveFilters, labelSuggestions, matchesFilters, statusSuggestions } from '../resourceFilters'
+import { resourceDefinition, resourceRegistry } from '../resourceRegistry'
+import { nextSort, sortItems } from '../resourceSort'
+import { cleanKubernetesObject, formatLogTimestamp, logEntryKey, objectKey } from '../resourceUtils'
 import type { DetailsTab, SortState, TableFilters } from '../types'
 
 type KubeWatchBodyProps = {

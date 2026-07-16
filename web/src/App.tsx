@@ -5,7 +5,8 @@ import { RelativeAgeProvider } from './components/RelativeAge'
 import { useContexts } from './hooks/useContexts'
 import { useVersionInfo } from './hooks/useVersionInfo'
 import { useViewRoute } from './hooks/useViewRoute'
-import { contextSelectOptions, versionLabel } from './resources'
+import { contextSelectOptions } from './resourceFilters'
+import { versionLabel } from './resourceUtils'
 
 const prefersDarkMode = typeof window !== 'undefined' &&
   typeof window.matchMedia === 'function' &&

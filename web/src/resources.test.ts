@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { eventMatchesResource, resourceDefinition, resourceOptions, supportedResource } from './resources'
+import { resourceDefinition, resourceOptions, supportedResource } from './resourceRegistry'
+import { eventMatchesResource } from './resourceUtils'
 
 const expectedResources = {
   pods: {

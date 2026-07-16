@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { defaultResource, resourceOptions } from './resources'
+import { defaultResource, resourceOptions } from './resourceRegistry'
 import { currentViewRoute, viewRoutePath } from './routing'
 
 describe('routing', () => {

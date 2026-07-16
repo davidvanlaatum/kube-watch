@@ -1,4 +1,4 @@
-import { defaultResource, supportedResource } from './resources'
+import { defaultResource, supportedResource } from './resourceRegistry'
 import type { ViewRoute } from './types'
 
 export function currentViewRoute(): ViewRoute {
