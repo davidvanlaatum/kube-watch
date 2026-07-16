@@ -4,61 +4,15 @@ import type { SyntheticEvent } from 'react'
 import { RelativeAge, formatDurationBetween } from './components/RelativeAge'
 import type { Column, SortDirection, SortState, TableFilters, ContextInfo, LogEntry } from './types'
 
-export const resourceOptions = [
-  'pods',
-  'deployments',
-  'statefulsets',
-  'replicasets',
-  'services',
-  'jobs',
-  'cronjobs',
-  'hpas',
-  'configmaps',
-  'secrets',
-  'serviceaccounts',
-  'poddisruptionbudgets',
-  'networkpolicies',
-  'events',
-  'helmreleases',
-]
-
-export const defaultResource = 'pods'
-
-export const eventSupportedResources = new Set([
-  'pods',
-  'deployments',
-  'statefulsets',
-  'replicasets',
-  'services',
-  'jobs',
-  'cronjobs',
-  'hpas',
-  'configmaps',
-  'secrets',
-  'serviceaccounts',
-  'poddisruptionbudgets',
-  'networkpolicies',
-])
-
-export const logSupportedResources = new Set(['pods', 'deployments'])
-
-const statusFilterResources = new Set(['pods', 'deployments', 'statefulsets', 'jobs', 'events', 'helmreleases'])
-
-const resourceKinds: Record<string, string> = {
-  pods: 'Pod',
-  deployments: 'Deployment',
-  statefulsets: 'StatefulSet',
-  replicasets: 'ReplicaSet',
-  services: 'Service',
-  jobs: 'Job',
-  cronjobs: 'CronJob',
-  hpas: 'HorizontalPodAutoscaler',
-  configmaps: 'ConfigMap',
-  secrets: 'Secret',
-  serviceaccounts: 'ServiceAccount',
-  poddisruptionbudgets: 'PodDisruptionBudget',
-  networkpolicies: 'NetworkPolicy',
-  helmreleases: 'HelmRelease',
+export type ResourceDefinition = {
+  kind?: string
+  columns: Column[]
+  supports: {
+    events: boolean
+    logs: boolean
+    history: boolean
+    statusFilter: boolean
+  }
 }
 
 export const emptyFilters: TableFilters = {
@@ -78,7 +32,7 @@ function column(
   return { id, header, value, ...options }
 }
 
-export const columnsByResource: Record<string, Column[]> = {
+const resourceColumns: Record<string, Column[]> = {
   pods: [
     column('name', 'NAME', name, { sortValue: nameSortValue }),
     column('ready', 'READY', podReady, { align: 'center', sortValue: podReadySortValue }),
@@ -183,6 +137,92 @@ export const columnsByResource: Record<string, Column[]> = {
     column('revision', 'REVISION', (o) => o.status?.revision ?? 0, { align: 'right', sortValue: (o) => o.status?.revision ?? 0 }),
     column('updated', 'UPDATED', helmUpdated, { align: 'right', sortValue: (o) => timestampSortValue(o.status?.updated) }),
   ],
+}
+
+export const resourceRegistry = {
+  pods: {
+    kind: 'Pod',
+    columns: resourceColumns.pods,
+    supports: { events: true, logs: true, history: false, statusFilter: true },
+  },
+  deployments: {
+    kind: 'Deployment',
+    columns: resourceColumns.deployments,
+    supports: { events: true, logs: true, history: false, statusFilter: true },
+  },
+  statefulsets: {
+    kind: 'StatefulSet',
+    columns: resourceColumns.statefulsets,
+    supports: { events: true, logs: false, history: false, statusFilter: true },
+  },
+  replicasets: {
+    kind: 'ReplicaSet',
+    columns: resourceColumns.replicasets,
+    supports: { events: true, logs: false, history: false, statusFilter: false },
+  },
+  services: {
+    kind: 'Service',
+    columns: resourceColumns.services,
+    supports: { events: true, logs: false, history: false, statusFilter: false },
+  },
+  jobs: {
+    kind: 'Job',
+    columns: resourceColumns.jobs,
+    supports: { events: true, logs: false, history: false, statusFilter: true },
+  },
+  cronjobs: {
+    kind: 'CronJob',
+    columns: resourceColumns.cronjobs,
+    supports: { events: true, logs: false, history: false, statusFilter: false },
+  },
+  hpas: {
+    kind: 'HorizontalPodAutoscaler',
+    columns: resourceColumns.hpas,
+    supports: { events: true, logs: false, history: false, statusFilter: false },
+  },
+  configmaps: {
+    kind: 'ConfigMap',
+    columns: resourceColumns.configmaps,
+    supports: { events: true, logs: false, history: false, statusFilter: false },
+  },
+  secrets: {
+    kind: 'Secret',
+    columns: resourceColumns.secrets,
+    supports: { events: true, logs: false, history: false, statusFilter: false },
+  },
+  serviceaccounts: {
+    kind: 'ServiceAccount',
+    columns: resourceColumns.serviceaccounts,
+    supports: { events: true, logs: false, history: false, statusFilter: false },
+  },
+  poddisruptionbudgets: {
+    kind: 'PodDisruptionBudget',
+    columns: resourceColumns.poddisruptionbudgets,
+    supports: { events: true, logs: false, history: false, statusFilter: false },
+  },
+  networkpolicies: {
+    kind: 'NetworkPolicy',
+    columns: resourceColumns.networkpolicies,
+    supports: { events: true, logs: false, history: false, statusFilter: false },
+  },
+  events: {
+    columns: resourceColumns.events,
+    supports: { events: false, logs: false, history: false, statusFilter: true },
+  },
+  helmreleases: {
+    kind: 'HelmRelease',
+    columns: resourceColumns.helmreleases,
+    supports: { events: false, logs: false, history: true, statusFilter: true },
+  },
+} satisfies Record<string, ResourceDefinition>
+
+export type ResourceName = keyof typeof resourceRegistry
+
+export const resourceOptions = Object.keys(resourceRegistry) as ResourceName[]
+export const defaultResource: ResourceName = 'pods'
+
+export function resourceDefinition(resource: string): ResourceDefinition | undefined {
+  return resourceRegistry[resource as ResourceName]
 }
 
 function name(o: any) {
@@ -377,10 +417,6 @@ export function statusSuggestions(resource: string, objects: any[]) {
   return [...suggestions].sort()
 }
 
-export function supportsStatusFilter(resource: string) {
-  return statusFilterResources.has(resource)
-}
-
 export function matchesFilters(resource: string, object: any, filters: TableFilters) {
   const nameFilter = filters.name.trim().toLowerCase()
   if (nameFilter && !String(object.metadata?.name || '').toLowerCase().includes(nameFilter)) return false
@@ -538,12 +574,12 @@ export function versionLabel(version: string) {
 }
 
 export function supportedResource(resource: string | undefined): resource is string {
-  return Boolean(resource && columnsByResource[resource])
+  return Boolean(resource && resourceDefinition(resource))
 }
 
 export function sortItems(resource: string, values: any[], sort: SortState) {
   if (sort) {
-    const sortValue = columnsByResource[resource]?.find(column => column.id === sort.columnId)?.sortValue ?? nameSortValue
+    const sortValue = resourceDefinition(resource)?.columns.find(column => column.id === sort.columnId)?.sortValue ?? nameSortValue
     return values.sort((a, b) => compareSortValues(
       sortValue(a),
       sortValue(b),
@@ -613,7 +649,7 @@ export function eventMatchesResource(event: any, resourceObject: any, resource: 
   if (involved.uid && md.uid) {
     return involved.uid === md.uid
   }
-  const expectedKind = resourceObject.kind || resourceKinds[resource]
+  const expectedKind = resourceObject.kind || resourceDefinition(resource)?.kind
   return involved.name === md.name &&
     involved.namespace === md.namespace &&
     (!expectedKind || !involved.kind || involved.kind === expectedKind)

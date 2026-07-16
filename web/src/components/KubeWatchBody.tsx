@@ -13,20 +13,18 @@ import { useResourceLogs } from '../hooks/useResourceLogs'
 import { useResourceStream } from '../hooks/useResourceStream'
 import {
   cleanKubernetesObject,
-  columnsByResource,
   emptyFilters,
-  eventSupportedResources,
   formatLogTimestamp,
   hasActiveFilters,
   labelSuggestions,
   logEntryKey,
-  logSupportedResources,
   matchesFilters,
   nextSort,
   objectKey,
+  resourceDefinition,
+  resourceRegistry,
   sortItems,
   statusSuggestions,
-  supportsStatusFilter,
 } from '../resources'
 import type { DetailsTab, SortState, TableFilters } from '../types'
 
@@ -63,10 +61,11 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
     onSelectedDeleted: handleSelectedResourceDeleted,
   })
 
-  const columns = columnsByResource[resource] || columnsByResource.pods
+  const definition = resourceDefinition(resource) || resourceRegistry.pods
+  const columns = definition.columns
   const allItems = [...items.values()]
   const labelFilterSuggestions = useMemo(() => labelSuggestions(allItems), [allItems])
-  const showStatusFilter = supportsStatusFilter(resource)
+  const showStatusFilter = definition.supports.statusFilter
   const statusFilterSuggestions = useMemo(() => statusSuggestions(resource, allItems), [resource, allItems])
   const filteredItems = allItems.filter(item => matchesFilters(resource, item, filters))
   const sortedItems = sortItems(resource, filteredItems, sort)
@@ -77,13 +76,13 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
     error: helmHistoryError,
   } = useHelmHistory(ctx, resource, selectedItem, detailsTab)
   const detailsItem = selectedItem && (showFullDetails ? selectedItem : cleanKubernetesObject(selectedItem))
-  const supportsEvents = Boolean(selectedItem && eventSupportedResources.has(resource))
+  const supportsEvents = Boolean(selectedItem && definition.supports.events)
   const {
     sortedEvents: sortedSelectedEvents,
     loading: eventsLoading,
     error: eventsError,
   } = useResourceEvents(ctx, resource, selectedItem, supportsEvents)
-  const supportsLogs = Boolean(selectedItem && logSupportedResources.has(resource))
+  const supportsLogs = Boolean(selectedItem && definition.supports.logs)
   const {
     detailsRef: logDetailsRef,
     containers: logContainers,
@@ -103,7 +102,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
     detailsTab,
     tailLines: logTailLines,
   })
-  const supportsHistory = Boolean(selectedItem && resource === 'helmreleases')
+  const supportsHistory = Boolean(selectedItem && definition.supports.history)
   const { panelRef: detailsPanelRef, offset: detailsOffset } = useDetailsPanelOffset({
     isOpen: Boolean(selectedItem),
     selectionKey: selectedKey,
@@ -176,7 +175,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
           onToggleFull: () => setShowFullDetails(prev => !prev),
         }}
         events={{
-          columns: columnsByResource.events,
+          columns: resourceRegistry.events.columns,
           items: sortedSelectedEvents,
           loading: eventsLoading,
           error: eventsError,
