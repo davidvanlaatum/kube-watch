@@ -23,8 +23,11 @@ import {
 } from '@mui/material'
 import type { RefObject } from 'react'
 import { stringify } from 'yaml'
+import { JsonLogMessage } from './JsonLogMessage'
 import { RelativeAge } from './RelativeAge'
 import type { Column, DetailsTab, LogEntry } from '../types'
+
+const maximumHighlightedLogEntries = 200
 
 type DetailsSelection = {
   item: any
@@ -331,11 +334,16 @@ function LogsTab({
             borderColor: 'divider',
           }}
         >
-          {details.entries.map(entry => (
+          {details.entries.map((entry, index) => (
             <Box key={logEntryKey(entry)} className="log-line">
               <span className="log-time">{formatLogTimestamp(entry.timestamp)} </span>
               <span className="log-pod">{entry.pod}: </span>
-              <span className="log-message">{entry.line}</span>
+              <span className="log-message">
+                <JsonLogMessage
+                  line={entry.line}
+                  highlight={index >= details.entries.length - maximumHighlightedLogEntries}
+                />
+              </span>
             </Box>
           ))}
         </Box>

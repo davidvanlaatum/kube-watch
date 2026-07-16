@@ -20,6 +20,11 @@
   --error-foreground: #991b1b;
   --log-prefix: #2563eb;
   --log-time: #64748b;
+  --json-log-key: #7c3aed;
+  --json-log-string: #047857;
+  --json-log-number: #b45309;
+  --json-log-boolean: #be123c;
+  --json-log-null: #64748b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -45,6 +50,11 @@
     --error-foreground: #fecaca;
     --log-prefix: #93c5fd;
     --log-time: #94a3b8;
+    --json-log-key: #c4b5fd;
+    --json-log-string: #6ee7b7;
+    --json-log-number: #fcd34d;
+    --json-log-boolean: #fda4af;
+    --json-log-null: #94a3b8;
   }
 }
 
@@ -203,6 +213,24 @@ tr:hover .copy-name {
 .log-message {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.json-log-message {
+  white-space: pre-wrap;
+}
+.json-log-key {
+  color: var(--json-log-key);
+}
+.json-log-string {
+  color: var(--json-log-string);
+}
+.json-log-number {
+  color: var(--json-log-number);
+}
+.json-log-boolean {
+  color: var(--json-log-boolean);
+}
+.json-log-null {
+  color: var(--json-log-null);
 }
 .event-details table {
   font-size: 13px;
