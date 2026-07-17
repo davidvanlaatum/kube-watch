@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { ReactNode } from 'react'
 
 const maximumJsonLogBytes = 16_384
@@ -6,14 +7,14 @@ const jsonTokenPattern = String.raw`"(?:\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})|[^"\\]
 const textEncoder = new TextEncoder()
 const jsonLogByteBuffer = new Uint8Array(maximumJsonLogBytes + 1)
 
-export function JsonLogMessage({ line, highlight = true }: { line: string; highlight?: boolean }) {
+export const JsonLogMessage = memo(function JsonLogMessage({ line, highlight = true }: { line: string; highlight?: boolean }) {
   if (!highlight) return <>{line}</>
 
   const tokens = jsonLogTokens(line)
   if (tokens === null) return <>{line}</>
 
   return <span className="json-log-message">{tokens}</span>
-}
+})
 
 function jsonLogTokens(line: string): ReactNode[] | null {
   const { read, written } = textEncoder.encodeInto(line, jsonLogByteBuffer)

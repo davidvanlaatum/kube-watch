@@ -30,7 +30,12 @@ import { JsonLogMessage } from './JsonLogMessage'
 import { RelativeAge } from './RelativeAge'
 import type { Column, DetailsTab, LogEntry } from '../types'
 
-const maximumHighlightedLogEntries = 200
+const minimumHighlightedLogEntries = 200
+const maximumHighlightedLogEntries = 1_000
+
+export function highlightedLogEntryCount(tailLines: number) {
+  return Math.min(Math.max(tailLines * 5, minimumHighlightedLogEntries), maximumHighlightedLogEntries)
+}
 
 type DetailsSelection = {
   item: any
@@ -310,6 +315,8 @@ function LogsTab({
   formatLogTimestamp: DetailsFormatters['formatLogTimestamp']
   logEntryKey: DetailsFormatters['logEntryKey']
 }) {
+  const highlightedEntryCount = highlightedLogEntryCount(details.tailLines)
+
   useLayoutEffect(() => {
     if (details.autoScroll || restoreScrollTop === 0 || !details.detailsRef.current) return
     details.detailsRef.current.scrollTop = restoreScrollTop
@@ -395,7 +402,7 @@ function LogsTab({
               <span className="log-message">
                 <JsonLogMessage
                   line={entry.line}
-                  highlight={index >= details.entries.length - maximumHighlightedLogEntries}
+                  highlight={index >= details.entries.length - highlightedEntryCount}
                 />
               </span>
             </Box>
