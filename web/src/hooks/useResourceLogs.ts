@@ -9,6 +9,7 @@ type ResourceLogsOptions = {
   supportsLogs: boolean
   detailsTab: DetailsTab
   tailLines: number
+  isDetailsMaximized: boolean
 }
 
 const LOG_RECONNECT_ERROR = 'Log stream interrupted; waiting for EventSource to reconnect'
@@ -20,6 +21,7 @@ export function useResourceLogs({
   supportsLogs,
   detailsTab,
   tailLines,
+  isDetailsMaximized,
 }: ResourceLogsOptions) {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(false)
@@ -125,7 +127,7 @@ export function useResourceLogs({
   useEffect(() => {
     if (!autoScroll || !detailsRef.current) return
     detailsRef.current.scrollTop = detailsRef.current.scrollHeight
-  }, [autoScroll, sortedEntries.length, activeContainer])
+  }, [autoScroll, sortedEntries, activeContainer, isDetailsMaximized])
 
   return {
     detailsRef,

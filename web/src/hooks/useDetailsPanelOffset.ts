@@ -6,6 +6,7 @@ type DetailsPanelOffsetOptions = {
   selectionKey: string | null
   detailsTab: DetailsTab
   showFullDetails: boolean
+  isMaximized: boolean
   historyLength: number
   historyLoading: boolean
   logEntryCount: number
@@ -17,6 +18,7 @@ export function useDetailsPanelOffset({
   selectionKey,
   detailsTab,
   showFullDetails,
+  isMaximized,
   historyLength,
   historyLoading,
   logEntryCount,
@@ -26,7 +28,7 @@ export function useDetailsPanelOffset({
   const [offset, setOffset] = useState(0)
 
   useEffect(() => {
-    if (!isOpen || !panelRef.current) {
+    if (!isOpen || isMaximized || !panelRef.current) {
       setOffset(0)
       return
     }
@@ -45,7 +47,7 @@ export function useDetailsPanelOffset({
 
     window.addEventListener('resize', updateOffset)
     return () => window.removeEventListener('resize', updateOffset)
-  }, [isOpen, selectionKey, detailsTab, showFullDetails, historyLength, historyLoading, logEntryCount, eventCount])
+  }, [isOpen, selectionKey, detailsTab, showFullDetails, isMaximized, historyLength, historyLoading, logEntryCount, eventCount])
 
   return { panelRef, offset }
 }

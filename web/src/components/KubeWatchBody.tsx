@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Box, CircularProgress } from '@mui/material'
 import { BackendLogToasts } from './BackendLogToasts'
 import { DetailsDrawer } from './DetailsDrawer'
@@ -26,6 +26,8 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
   const [filters, setFilters] = useState<TableFilters>(emptyFilters)
   const [sort, setSort] = useState<SortState>(null)
   const [logTailLines, setLogTailLines] = useState(200)
+  const mainRef = useRef<HTMLElement | null>(null)
+  const selectedKeyRef = useRef<string | null>(null)
   const { logs: backendLogs, dismissLog: dismissBackendLog } = useBackendLogs()
   const {
     selectedKey,
@@ -34,20 +36,37 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
     setDetailsTab,
     showFullDetails,
     setShowFullDetails,
+    isDetailsMaximized,
+    setIsDetailsMaximized,
     resetDetailsView,
     closeDetails,
     handleSelectedResourceDeleted,
   } = useDetailsState()
+  useEffect(() => {
+    selectedKeyRef.current = selectedKey
+  }, [selectedKey])
 
   const resetResourceViewState = useCallback(() => {
     setFilters(emptyFilters)
     closeDetails()
     setSort(null)
   }, [closeDetails])
+  const restoreMainFocus = useCallback(() => {
+    requestAnimationFrame(() => mainRef.current?.focus())
+  }, [])
+  const closeDetailsAndRestoreFocus = useCallback(() => {
+    closeDetails()
+    restoreMainFocus()
+  }, [closeDetails, restoreMainFocus])
+  const handleSelectedResourceDeletedAndRestoreFocus = useCallback((key: string) => {
+    const wasSelected = selectedKeyRef.current === key
+    handleSelectedResourceDeleted(key)
+    if (wasSelected) restoreMainFocus()
+  }, [handleSelectedResourceDeleted, restoreMainFocus])
 
   const { items, isLoading, loadError } = useResourceStream(ctx, resource, {
     onReset: resetResourceViewState,
-    onSelectedDeleted: handleSelectedResourceDeleted,
+    onSelectedDeleted: handleSelectedResourceDeletedAndRestoreFocus,
   })
 
   const definition = resourceDefinition(resource) || resourceRegistry.pods
@@ -90,6 +109,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
     supportsLogs,
     detailsTab,
     tailLines: logTailLines,
+    isDetailsMaximized,
   })
   const supportsHistory = Boolean(selectedItem && definition.supports.history)
   const { panelRef: detailsPanelRef, offset: detailsOffset } = useDetailsPanelOffset({
@@ -97,6 +117,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
     selectionKey: selectedKey,
     detailsTab,
     showFullDetails,
+    isMaximized: isDetailsMaximized,
     historyLength: helmHistory.length,
     historyLoading: helmHistoryLoading,
     logEntryCount,
@@ -110,7 +131,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
   }, [filters.status, showStatusFilter])
 
   return (
-    <Box component="main" className={selectedItem ? 'has-details' : undefined} sx={{ p: 2, pb: selectedItem ? `${detailsOffset + 16}px` : 2 }}>
+    <Box ref={mainRef} component="main" tabIndex={-1} className={selectedItem ? 'has-details' : undefined} sx={{ p: 2, pb: selectedItem ? `${detailsOffset + 16}px` : 2 }}>
       {isLoading && (
         <Alert icon={<CircularProgress size={16} />} severity="info" role="status" sx={{ mb: 2 }}>
           Loading {resource}...
@@ -150,7 +171,11 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
           resource,
           detailsItem,
           panelRef: detailsPanelRef,
-          onClose: closeDetails,
+          onClose: closeDetailsAndRestoreFocus,
+        }}
+        view={{
+          isMaximized: isDetailsMaximized,
+          onToggleMaximized: () => setIsDetailsMaximized(prev => !prev),
         }}
         tabs={{
           active: detailsTab,
@@ -177,6 +202,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
         }}
         logs={{
           detailsRef: logDetailsRef,
+          isMaximized: isDetailsMaximized,
           tailLines: logTailLines,
           onTailLinesChange: setLogTailLines,
           autoScroll: autoScrollLogs,

@@ -1,4 +1,6 @@
 import CloseIcon from '@mui/icons-material/Close'
+import FullscreenExitIcon from '@mui/icons-material/FullscreenExit'
+import FullscreenIcon from '@mui/icons-material/Fullscreen'
 import {
   Alert,
   Box,
@@ -21,6 +23,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { RefObject } from 'react'
 import { stringify } from 'yaml'
 import { JsonLogMessage } from './JsonLogMessage'
@@ -46,6 +49,11 @@ type DetailsTabs = {
   supportsHistory: boolean
 }
 
+type DetailsView = {
+  isMaximized: boolean
+  onToggleMaximized: () => void
+}
+
 type YamlDetails = {
   showFull: boolean
   onToggleFull: () => void
@@ -67,6 +75,7 @@ type HistoryDetails = {
 
 type LogsDetails = {
   detailsRef: RefObject<HTMLDivElement | null>
+  isMaximized: boolean
   tailLines: number
   onTailLinesChange: (value: number) => void
   autoScroll: boolean
@@ -86,6 +95,7 @@ type DetailsFormatters = {
 
 type DetailsDrawerProps = {
   selection: DetailsSelection
+  view: DetailsView
   tabs: DetailsTabs
   yaml: YamlDetails
   events: EventsDetails
@@ -96,6 +106,7 @@ type DetailsDrawerProps = {
 
 export function DetailsDrawer({
   selection,
+  view,
   tabs,
   yaml,
   events,
@@ -104,22 +115,40 @@ export function DetailsDrawer({
   formatters,
 }: DetailsDrawerProps) {
   const { item, key, resource, detailsItem, panelRef, onClose } = selection
+  const maximizeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const logScrollTopRef = useRef(0)
+  const wasMaximized = useRef(view.isMaximized)
+
+  useEffect(() => {
+    if (wasMaximized.current === view.isMaximized) return
+    wasMaximized.current = view.isMaximized
+    maximizeButtonRef.current?.focus()
+  }, [view.isMaximized])
+
+  const toggleMaximized = () => {
+    logScrollTopRef.current = logs.detailsRef.current?.scrollTop || 0
+    view.onToggleMaximized()
+  }
 
   return (
     <Drawer
       anchor="bottom"
       open={Boolean(item)}
-      variant="persistent"
+      variant={view.isMaximized ? 'temporary' : 'persistent'}
+      onClose={view.isMaximized ? onClose : undefined}
+      hideBackdrop={view.isMaximized}
       slotProps={{
         paper: {
           ref: panelRef,
-          className: 'details-panel',
+          className: `details-panel${view.isMaximized ? ' details-panel-maximized' : ''}`,
+          'aria-labelledby': 'details-drawer-title',
           sx: {
             right: 12,
             bottom: 12,
             left: 12,
             width: 'auto',
-            maxHeight: '42vh',
+            height: view.isMaximized ? 'calc(100vh - 24px)' : 'auto',
+            maxHeight: view.isMaximized ? 'calc(100vh - 24px)' : '42vh',
             borderRadius: 2,
             overflow: 'hidden',
           },
@@ -127,9 +156,9 @@ export function DetailsDrawer({
       }}
     >
       {item && (
-        <Box component="section" aria-label="Selected resource details">
+        <Box component="section" className="details-content" aria-label="Selected resource details">
           <Box className="details-header">
-            <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 700 }}>
+            <Typography id="details-drawer-title" variant="subtitle1" component="h2" sx={{ fontWeight: 700 }}>
               {item.kind || resource}/{item.metadata?.name || key}
             </Typography>
             <Stack direction="row" spacing={1}>
@@ -138,6 +167,17 @@ export function DetailsDrawer({
                   {yaml.showFull ? 'Hide housekeeping' : 'Show full YAML'}
                 </Button>
               )}
+              <Tooltip title={view.isMaximized ? 'Restore details size' : 'Maximize details'}>
+                <IconButton
+                  size="small"
+                  type="button"
+                  ref={maximizeButtonRef}
+                  aria-label={view.isMaximized ? 'Restore details size' : 'Maximize details'}
+                  onClick={toggleMaximized}
+                >
+                  {view.isMaximized ? <FullscreenExitIcon fontSize="small" /> : <FullscreenIcon fontSize="small" />}
+                </IconButton>
+              </Tooltip>
               <Tooltip title="Close details">
                 <IconButton size="small" type="button" aria-label="Close" onClick={onClose}>
                   <CloseIcon fontSize="small" />
@@ -160,6 +200,7 @@ export function DetailsDrawer({
             <LogsTab
               resource={resource}
               details={logs}
+              restoreScrollTop={logScrollTopRef.current}
               formatLogTimestamp={formatters.formatLogTimestamp}
               logEntryKey={formatters.logEntryKey}
             />
@@ -187,7 +228,7 @@ function HistoryTab({
         <Alert severity="info" className="empty-state">No history found for this release.</Alert>
       )}
       {details.items.length > 0 && (
-        <TableContainer component={Paper} sx={{ border: 1, borderColor: 'divider', maxHeight: '28vh' }}>
+        <TableContainer component={Paper} className="details-table" sx={{ border: 1, borderColor: 'divider' }}>
           <Table size="small" stickyHeader>
             <TableHead>
               <TableRow>
@@ -231,7 +272,7 @@ function EventsTab({ details }: { details: EventsDetails }) {
         <Alert severity="info" className="empty-state">No events found for this resource.</Alert>
       )}
       {details.items.length > 0 && (
-        <TableContainer component={Paper} sx={{ border: 1, borderColor: 'divider', maxHeight: '28vh' }}>
+        <TableContainer component={Paper} className="details-table" sx={{ border: 1, borderColor: 'divider' }}>
           <Table size="small" stickyHeader>
             <TableHead>
               <TableRow>
@@ -259,16 +300,28 @@ function EventsTab({ details }: { details: EventsDetails }) {
 function LogsTab({
   resource,
   details,
+  restoreScrollTop,
   formatLogTimestamp,
   logEntryKey,
 }: {
   resource: string
   details: LogsDetails
+  restoreScrollTop: number
   formatLogTimestamp: DetailsFormatters['formatLogTimestamp']
   logEntryKey: DetailsFormatters['logEntryKey']
 }) {
+  useLayoutEffect(() => {
+    if (details.autoScroll || restoreScrollTop === 0 || !details.detailsRef.current) return
+    details.detailsRef.current.scrollTop = restoreScrollTop
+  }, [details.autoScroll, details.isMaximized, restoreScrollTop])
+
+  useEffect(() => {
+    if (!details.isMaximized || !details.autoScroll || !details.detailsRef.current) return
+    details.detailsRef.current.scrollTop = details.detailsRef.current.scrollHeight
+  }, [details.activeContainer, details.autoScroll, details.entries.length, details.isMaximized])
+
   return (
-    <Box ref={details.detailsRef} className="log-details">
+    <Box ref={details.isMaximized ? undefined : details.detailsRef} className="log-details">
       <Box
         className="log-controls"
         sx={{
@@ -326,6 +379,7 @@ function LogsTab({
       )}
       {details.entries.length > 0 && (
         <Box
+          ref={details.isMaximized ? details.detailsRef : undefined}
           className="log-output"
           aria-label={`Logs for ${details.activeContainer}`}
           sx={{

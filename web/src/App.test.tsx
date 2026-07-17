@@ -483,6 +483,8 @@ describe('App', () => {
     modified.type = 'MODIFIED'
     MockEventSource.instances[0].emit(modified)
     expect(await screen.findByRole('row', { name: /Pending/ })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Maximize details' }))
+    expect(screen.getByRole('dialog', { name: 'Pod/api-7d9f' })).toBeInTheDocument()
 
     const deleted = podEvent('pod-1', 'api-7d9f')
     deleted.type = 'DELETED'
@@ -491,6 +493,8 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.queryByRole('row', { name: /api-7d9f/ })).not.toBeInTheDocument()
     })
+    await vi.advanceTimersByTimeAsync(16)
+    expect(document.activeElement).toBe(screen.getByRole('main'))
     expect(screen.queryByRole('button', { name: 'YAML' })).not.toBeInTheDocument()
   })
 
@@ -777,6 +781,12 @@ describe('App', () => {
     const row = await screen.findByRole('row', { name: /api-7d9f/ })
     await user.click(row)
     await user.click(screen.getByRole('tab', { name: 'Logs' }))
+    await user.click(screen.getByRole('button', { name: 'Maximize details' }))
+    expect(screen.getByRole('button', { name: 'Restore details size' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Pod/api-7d9f' })).toBeInTheDocument()
+    expect(document.querySelector('.details-panel-maximized')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Restore details size' }))
+    expect(screen.getByRole('button', { name: 'Maximize details' })).toBeInTheDocument()
 
     await waitFor(() => {
       expect(MockEventSource.instances.some(instance => instance.url === '/logs/dev/pods/default/api-7d9f?tailLines=200')).toBe(true)

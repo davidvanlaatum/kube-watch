@@ -152,6 +152,9 @@ tr:hover .copy-name {
   overflow: auto;
   user-select: text;
 }
+.details-table {
+  max-height: 28vh;
+}
 .event-details {
   max-height: 32vh;
   overflow: auto;
@@ -161,6 +164,41 @@ tr:hover .copy-name {
   max-height: 32vh;
   overflow: auto;
   padding: 0 12px 12px;
+}
+.details-panel-maximized .details-content {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+}
+.details-panel-maximized .details-content > pre,
+.details-panel-maximized .event-details,
+.details-panel-maximized .log-details {
+  min-height: 0;
+  max-height: none;
+  height: 100%;
+}
+.details-panel-maximized .event-details,
+.details-panel-maximized .log-details {
+  display: flex;
+  flex-direction: column;
+}
+.details-panel-maximized .details-table,
+.details-panel-maximized .log-output {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  height: auto;
+}
+.details-panel-maximized .log-controls {
+  flex: 0 0 auto;
+}
+.details-panel-maximized .log-details {
+  overflow: hidden;
+}
+.details-panel-maximized .log-output {
+  overflow: auto;
 }
 .log-controls {
   position: sticky;

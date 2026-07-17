@@ -10,9 +10,11 @@ function DetailsStateHarness() {
       <output data-testid="selected-key">{state.selectedKey || ''}</output>
       <output data-testid="details-tab">{state.detailsTab}</output>
       <output data-testid="show-full">{String(state.showFullDetails)}</output>
+      <output data-testid="is-maximized">{String(state.isDetailsMaximized)}</output>
       <button type="button" onClick={() => state.setSelectedKey('pod-1')}>Select</button>
       <button type="button" onClick={() => state.setDetailsTab('events')}>Events</button>
       <button type="button" onClick={() => state.setShowFullDetails(true)}>Show full</button>
+      <button type="button" onClick={() => state.setIsDetailsMaximized(true)}>Maximize</button>
       <button type="button" onClick={state.resetDetailsView}>Reset view</button>
       <button type="button" onClick={state.closeDetails}>Close</button>
       <button type="button" onClick={() => state.handleSelectedResourceDeleted('pod-2')}>Delete other</button>
@@ -21,10 +23,11 @@ function DetailsStateHarness() {
   )
 }
 
-function expectDetailsState(selectedKey: string, tab: string, showFull: boolean) {
+function expectDetailsState(selectedKey: string, tab: string, showFull: boolean, isMaximized = false) {
   expect(screen.getByTestId('selected-key')).toHaveTextContent(selectedKey)
   expect(screen.getByTestId('details-tab')).toHaveTextContent(tab)
   expect(screen.getByTestId('show-full')).toHaveTextContent(String(showFull))
+  expect(screen.getByTestId('is-maximized')).toHaveTextContent(String(isMaximized))
 }
 
 describe('useDetailsState', () => {
@@ -37,8 +40,9 @@ describe('useDetailsState', () => {
       screen.getByRole('button', { name: 'Select' }).click()
       screen.getByRole('button', { name: 'Events' }).click()
       screen.getByRole('button', { name: 'Show full' }).click()
+      screen.getByRole('button', { name: 'Maximize' }).click()
     })
-    expectDetailsState('pod-1', 'events', true)
+    expectDetailsState('pod-1', 'events', true, true)
 
     act(() => {
       screen.getByRole('button', { name: 'Reset view' }).click()
@@ -53,9 +57,10 @@ describe('useDetailsState', () => {
       screen.getByRole('button', { name: 'Select' }).click()
       screen.getByRole('button', { name: 'Events' }).click()
       screen.getByRole('button', { name: 'Show full' }).click()
+      screen.getByRole('button', { name: 'Maximize' }).click()
       screen.getByRole('button', { name: 'Delete other' }).click()
     })
-    expectDetailsState('pod-1', 'events', true)
+    expectDetailsState('pod-1', 'events', true, true)
 
     act(() => {
       screen.getByRole('button', { name: 'Delete selected' }).click()
@@ -70,6 +75,7 @@ describe('useDetailsState', () => {
       screen.getByRole('button', { name: 'Select' }).click()
       screen.getByRole('button', { name: 'Events' }).click()
       screen.getByRole('button', { name: 'Show full' }).click()
+      screen.getByRole('button', { name: 'Maximize' }).click()
       screen.getByRole('button', { name: 'Close' }).click()
     })
 

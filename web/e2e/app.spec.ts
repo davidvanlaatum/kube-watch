@@ -68,6 +68,45 @@ const helmHistory = [
   },
 ]
 
+async function maximizeAndExpectExpanded(
+  page: import('@playwright/test').Page,
+  contentSelector: string,
+  fixedSelector?: string,
+  scrollSelector?: string,
+) {
+  const normalContent = page.locator(`.details-panel:not(.details-panel-maximized) ${contentSelector}`)
+  const normalFixed = fixedSelector && page.locator(`.details-panel:not(.details-panel-maximized) ${fixedSelector}`)
+  const originalHeight = (await normalContent.boundingBox())?.height || 0
+  const originalFixedHeight = normalFixed && (await normalFixed.boundingBox())?.height
+  await page.getByRole('button', { name: 'Maximize details' }).click()
+  const maximizedDrawer = page.locator('.details-panel-maximized')
+  const maximizedContent = page.locator(`.details-panel-maximized ${contentSelector}`)
+  await expect(maximizedDrawer).toBeVisible()
+  await expect(page.locator('.MuiBackdrop-root')).toHaveCount(0)
+  await page.waitForTimeout(300)
+  const drawer = await maximizedDrawer.boundingBox()
+  expect(drawer?.height).toBeGreaterThan((page.viewportSize()?.height || 0) * 0.9)
+  const maximizedHeight = (await maximizedContent.boundingBox())?.height || 0
+  expect(maximizedHeight).toBeGreaterThan(originalHeight)
+  if (fixedSelector) {
+    const maximizedFixedHeight = (await page.locator(`.details-panel-maximized ${fixedSelector}`).boundingBox())?.height || 0
+    expect(Math.abs(maximizedFixedHeight - (originalFixedHeight || 0))).toBeLessThan(2)
+  }
+  if (scrollSelector) {
+    await expect.poll(async () => page.locator(`.details-panel-maximized ${scrollSelector}`).evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+  }
+  const contentBox = await maximizedContent.boundingBox()
+  const bottomGap = (drawer?.y || 0) + (drawer?.height || 0) - ((contentBox?.y || 0) + (contentBox?.height || 0))
+  expect(bottomGap).toBeGreaterThanOrEqual(0)
+  expect(bottomGap).toBeLessThan(16)
+  await page.getByRole('button', { name: 'Restore details size' }).click()
+  await expect(maximizedDrawer).toHaveCount(0)
+  await expect.poll(async () => {
+    const restoredHeight = (await normalContent.boundingBox())?.height || 0
+    return Math.abs(restoredHeight - originalHeight)
+  }).toBeLessThan(2)
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'clipboard', {
@@ -195,6 +234,8 @@ test('renders Helm release table and history drawer', async ({ page }) => {
 
   await expect(page.getByText('Install complete')).toBeVisible()
   await expect(page.getByText('Upgrade complete')).toBeVisible()
+  await maximizeAndExpectExpanded(page, '.details-table')
+  await expect(page.locator('.details-table')).toBeVisible()
 })
 
 test('renders pod table, copy feedback, YAML details, events, and logs tab', async ({ page }) => {
@@ -226,16 +267,30 @@ test('renders pod table, copy feedback, YAML details, events, and logs tab', asy
   await expect(page.getByRole('heading', { name: 'Pod/api-7d9f' })).toBeVisible()
   await expect(page.getByText('managedFields')).not.toBeVisible()
   await expect(page.getByText('nodeName: node-a')).toBeVisible()
+  await maximizeAndExpectExpanded(page, 'pre')
+  await expect(page.locator('.details-panel pre')).toBeVisible()
 
   await page.getByRole('tab', { name: 'Events' }).click()
   await expect(page.getByText('Started container api')).toBeVisible()
+  await maximizeAndExpectExpanded(page, '.details-table')
+  await expect(page.locator('.details-table')).toBeVisible()
 
   await page.getByRole('tab', { name: 'Logs' }).click()
   await expect(page.getByRole('spinbutton')).toHaveValue('200')
   await expect(page.getByRole('tab', { name: 'api', exact: true })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByLabel('Logs for api')).toContainText('api-7d9f: server line 80')
+  await maximizeAndExpectExpanded(page, '.log-details', '.log-controls', '.log-output')
+  await expect(page.locator('.log-details')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Auto scroll on' })).toBeVisible()
   await expect.poll(async () => page.locator('.log-details').evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+  const logDetails = page.locator('.details-panel:not([role="dialog"]) .log-details').last()
   await page.getByRole('button', { name: 'Auto scroll on' }).click()
   await expect(page.getByRole('button', { name: 'Auto scroll off' })).toBeVisible()
+  await expect.poll(async () => logDetails.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+  await logDetails.evaluate(element => { element.scrollTop = 120 })
+  const manualScrollTop = await logDetails.evaluate(element => element.scrollTop)
+  await page.getByRole('button', { name: 'Maximize details' }).click()
+  await expect.poll(async () => page.locator('.details-panel-maximized .log-output').evaluate(element => element.scrollTop)).toBe(manualScrollTop)
+  await page.getByRole('button', { name: 'Restore details size' }).click()
+  await expect.poll(async () => logDetails.evaluate(element => element.scrollTop)).toBe(manualScrollTop)
 })

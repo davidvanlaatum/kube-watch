@@ -19,14 +19,16 @@ class MockResizeObserver {
 type OffsetHarnessProps = {
   isOpen?: boolean
   selectionKey?: string | null
+  isMaximized?: boolean
 }
 
-function OffsetHarness({ isOpen = true, selectionKey = 'pod-1' }: OffsetHarnessProps) {
+function OffsetHarness({ isOpen = true, selectionKey = 'pod-1', isMaximized = false }: OffsetHarnessProps) {
   const { panelRef, offset } = useDetailsPanelOffset({
     isOpen,
     selectionKey,
     detailsTab: 'yaml',
     showFullDetails: false,
+    isMaximized,
     historyLength: 0,
     historyLoading: false,
     logEntryCount: 0,
@@ -94,5 +96,13 @@ describe('useDetailsPanelOffset', () => {
       window.dispatchEvent(new Event('resize'))
     })
     expect(screen.getByTestId('panel')).toHaveAttribute('data-offset', '324')
+  })
+
+  it('clears the reserved table offset when the details drawer is maximized', () => {
+    const { rerender } = render(<OffsetHarness />)
+    expect(screen.getByTestId('panel')).toHaveAttribute('data-offset', '124')
+
+    rerender(<OffsetHarness isMaximized />)
+    expect(screen.getByTestId('panel')).toHaveAttribute('data-offset', '0')
   })
 })
