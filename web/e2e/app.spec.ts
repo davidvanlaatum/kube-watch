@@ -1,4 +1,33 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type TestInfo } from '@playwright/test'
+import { mkdirSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+
+const readmeScreenshotDirectory = process.env.UPDATE_README_SCREENSHOTS
+  ? resolve(process.cwd(), '../docs/screenshots')
+  : null
+
+type ScreenshotTheme = 'light' | 'dark'
+
+function screenshotTheme(testInfo: TestInfo): ScreenshotTheme {
+  return testInfo.project.use.colorScheme === 'dark' ? 'dark' : 'light'
+}
+
+async function captureReadmeScreenshot(
+  page: import('@playwright/test').Page,
+  name: string,
+  theme: ScreenshotTheme,
+  clip?: { x: number; y: number; width: number; height: number },
+) {
+  if (!readmeScreenshotDirectory) return
+  mkdirSync(readmeScreenshotDirectory, { recursive: true })
+  await page.locator('.MuiAlert-root').evaluateAll(alerts => {
+    for (const alert of alerts) {
+      if (alert.textContent?.includes('interrupted')) (alert as HTMLElement).style.display = 'none'
+    }
+  })
+  const themedName = theme === 'dark' ? name.replace(/\.png$/, '-dark.png') : name
+  await page.screenshot({ path: join(readmeScreenshotDirectory, themedName), clip })
+}
 
 const pod = {
   kind: 'Pod',
@@ -73,6 +102,8 @@ async function maximizeAndExpectExpanded(
   contentSelector: string,
   fixedSelector?: string,
   scrollSelector?: string,
+  screenshotName?: string,
+  theme?: ScreenshotTheme,
 ) {
   const normalContent = page.locator(`.details-panel:not(.details-panel-maximized) ${contentSelector}`)
   const normalFixed = fixedSelector && page.locator(`.details-panel:not(.details-panel-maximized) ${fixedSelector}`)
@@ -99,6 +130,7 @@ async function maximizeAndExpectExpanded(
   const bottomGap = (drawer?.y || 0) + (drawer?.height || 0) - ((contentBox?.y || 0) + (contentBox?.height || 0))
   expect(bottomGap).toBeGreaterThanOrEqual(0)
   expect(bottomGap).toBeLessThan(16)
+  if (screenshotName && theme) await captureReadmeScreenshot(page, screenshotName, theme)
   await page.getByRole('button', { name: 'Restore details size' }).click()
   await expect(maximizedDrawer).toHaveCount(0)
   await expect.poll(async () => {
@@ -108,6 +140,8 @@ async function maximizeAndExpectExpanded(
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-07-08T00:00:00Z') })
+
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -212,7 +246,9 @@ test.beforeEach(async ({ page }) => {
       pod: 'api-7d9f',
       container: 'api',
       timestamp: `2026-07-08T00:00:${String(index % 60).padStart(2, '0')}Z`,
-      line: `server line ${index + 1}`,
+      line: index % 5 === 0
+        ? JSON.stringify({ level: 'info', message: `request ${index + 1} complete`, status: 200 })
+        : `server line ${index + 1}`,
       seq: index,
     })}`)
     await route.fulfill({
@@ -238,7 +274,8 @@ test('renders Helm release table and history drawer', async ({ page }) => {
   await expect(page.locator('.details-table')).toBeVisible()
 })
 
-test('renders pod table, copy feedback, YAML details, events, and logs tab', async ({ page }) => {
+test('renders pod table, copy feedback, YAML details, events, and logs tab', async ({ page }, testInfo) => {
+  const theme = screenshotTheme(testInfo)
   await page.goto('/')
 
   await expect(page.getByText('v1.0.0')).toBeVisible()
@@ -258,15 +295,14 @@ test('renders pod table, copy feedback, YAML details, events, and logs tab', asy
   await expect(page.getByText('0/1 shown')).toBeVisible()
   await page.getByRole('button', { name: 'Clear filters' }).click()
   await expect(row).toBeVisible()
-
-  const copyButton = row.getByRole('button', { name: 'Copy api-7d9f' })
-  await copyButton.click()
-  await expect(row.getByText('Copied')).toBeVisible()
+  await captureReadmeScreenshot(page, 'resource-overview.png', theme, { x: 0, y: 0, width: 1280, height: 300 })
 
   await row.click()
   await expect(page.getByRole('heading', { name: 'Pod/api-7d9f' })).toBeVisible()
   await expect(page.getByText('managedFields')).not.toBeVisible()
   await expect(page.getByText('nodeName: node-a')).toBeVisible()
+  await page.waitForTimeout(300)
+  await captureReadmeScreenshot(page, 'details-yaml.png', theme)
   await maximizeAndExpectExpanded(page, 'pre')
   await expect(page.locator('.details-panel pre')).toBeVisible()
 
@@ -279,7 +315,7 @@ test('renders pod table, copy feedback, YAML details, events, and logs tab', asy
   await expect(page.getByRole('spinbutton')).toHaveValue('200')
   await expect(page.getByRole('tab', { name: 'api', exact: true })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByLabel('Logs for api')).toContainText('api-7d9f: server line 80')
-  await maximizeAndExpectExpanded(page, '.log-details', '.log-controls', '.log-output')
+  await maximizeAndExpectExpanded(page, '.log-details', '.log-controls', '.log-output', 'maximized-logs.png', theme)
   await expect(page.locator('.log-details')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Auto scroll on' })).toBeVisible()
   await expect.poll(async () => page.locator('.log-details').evaluate(element => element.scrollTop)).toBeGreaterThan(0)
@@ -293,4 +329,8 @@ test('renders pod table, copy feedback, YAML details, events, and logs tab', asy
   await expect.poll(async () => page.locator('.details-panel-maximized .log-output').evaluate(element => element.scrollTop)).toBe(manualScrollTop)
   await page.getByRole('button', { name: 'Restore details size' }).click()
   await expect.poll(async () => logDetails.evaluate(element => element.scrollTop)).toBe(manualScrollTop)
+
+  const copyButton = row.getByRole('button', { name: 'Copy api-7d9f' })
+  await copyButton.click()
+  await expect(row.getByText('Copied')).toBeVisible()
 })

@@ -6,6 +6,8 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL: 'http://127.0.0.1:5173',
+    locale: 'en-GB',
+    timezoneId: 'UTC',
     permissions: ['clipboard-write'],
     trace: 'on-first-retry',
   },
@@ -16,8 +18,12 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      name: 'light',
+      use: { ...devices['Desktop Chrome'], colorScheme: 'light' },
+    },
+    {
+      name: 'dark',
+      use: { ...devices['Desktop Chrome'], colorScheme: 'dark' },
     },
   ],
 })

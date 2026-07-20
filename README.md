@@ -8,6 +8,33 @@ Overview
 - Released binaries include build-time version metadata and the UI checks GitHub for newer releases.
 - Resource tables include client-side filters for name, status, labels, and resource-specific quick toggles such as pod restarts and readiness.
 
+Screenshots
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/resource-overview-dark.png">
+  <img src="docs/screenshots/resource-overview.png" alt="kube-watch pod resource overview" width="900">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/details-yaml-dark.png">
+  <img src="docs/screenshots/details-yaml.png" alt="kube-watch normal-size pod YAML details" width="900">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/maximized-logs-dark.png">
+  <img src="docs/screenshots/maximized-logs.png" alt="kube-watch maximized live log viewer" width="900">
+</picture>
+
+Regenerate the screenshots from the deterministic Playwright fixture with:
+
+```sh
+# Stop any Vite server already using port 5173.
+cd web
+npm ci
+npx playwright install chromium
+npm run screenshots:readme
+```
+
 Install
 - Prefer the pre-built binaries from GitHub Releases: https://github.com/davidvanlaatum/kube-watch/releases
 - Download the archive for your OS/architecture, extract `kube-watch`, and run it from your terminal. After installing on macOS/Linux, use `kube-watch selfupdate` to update in place. On Windows, update by downloading the latest archive and replacing `kube-watch.exe` manually.
