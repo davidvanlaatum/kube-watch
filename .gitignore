@@ -1,4 +1,5 @@
 # ignore editor/test artifacts
+.DS_Store
 .idea/
 .playwright-mcp/
 .playwright/
