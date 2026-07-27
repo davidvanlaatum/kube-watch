@@ -17,7 +17,6 @@ export {
 } from './resourceFilters'
 export { nextSort, sortItems } from './resourceSort'
 export {
-  cleanKubernetesObject,
   eventMatchesResource,
   formatLogTimestamp,
   logContainerNames,

@@ -9,11 +9,9 @@ function DetailsStateHarness() {
     <>
       <output data-testid="selected-key">{state.selectedKey || ''}</output>
       <output data-testid="details-tab">{state.detailsTab}</output>
-      <output data-testid="show-full">{String(state.showFullDetails)}</output>
       <output data-testid="is-maximized">{String(state.isDetailsMaximized)}</output>
       <button type="button" onClick={() => state.setSelectedKey('pod-1')}>Select</button>
       <button type="button" onClick={() => state.setDetailsTab('events')}>Events</button>
-      <button type="button" onClick={() => state.setShowFullDetails(true)}>Show full</button>
       <button type="button" onClick={() => state.setIsDetailsMaximized(true)}>Maximize</button>
       <button type="button" onClick={state.resetDetailsView}>Reset view</button>
       <button type="button" onClick={state.closeDetails}>Close</button>
@@ -23,10 +21,9 @@ function DetailsStateHarness() {
   )
 }
 
-function expectDetailsState(selectedKey: string, tab: string, showFull: boolean, isMaximized = false) {
+function expectDetailsState(selectedKey: string, tab: string, isMaximized = false) {
   expect(screen.getByTestId('selected-key')).toHaveTextContent(selectedKey)
   expect(screen.getByTestId('details-tab')).toHaveTextContent(tab)
-  expect(screen.getByTestId('show-full')).toHaveTextContent(String(showFull))
   expect(screen.getByTestId('is-maximized')).toHaveTextContent(String(isMaximized))
 }
 
@@ -39,15 +36,14 @@ describe('useDetailsState', () => {
     act(() => {
       screen.getByRole('button', { name: 'Select' }).click()
       screen.getByRole('button', { name: 'Events' }).click()
-      screen.getByRole('button', { name: 'Show full' }).click()
       screen.getByRole('button', { name: 'Maximize' }).click()
     })
-    expectDetailsState('pod-1', 'events', true, true)
+    expectDetailsState('pod-1', 'events', true)
 
     act(() => {
       screen.getByRole('button', { name: 'Reset view' }).click()
     })
-    expectDetailsState('pod-1', 'yaml', false)
+    expectDetailsState('pod-1', 'yaml')
   })
 
   it('only clears details when the deleted resource is selected', () => {
@@ -56,16 +52,15 @@ describe('useDetailsState', () => {
     act(() => {
       screen.getByRole('button', { name: 'Select' }).click()
       screen.getByRole('button', { name: 'Events' }).click()
-      screen.getByRole('button', { name: 'Show full' }).click()
       screen.getByRole('button', { name: 'Maximize' }).click()
       screen.getByRole('button', { name: 'Delete other' }).click()
     })
-    expectDetailsState('pod-1', 'events', true, true)
+    expectDetailsState('pod-1', 'events', true)
 
     act(() => {
       screen.getByRole('button', { name: 'Delete selected' }).click()
     })
-    expectDetailsState('', 'yaml', false)
+    expectDetailsState('', 'yaml')
   })
 
   it('closes details and restores the default view', () => {
@@ -74,11 +69,10 @@ describe('useDetailsState', () => {
     act(() => {
       screen.getByRole('button', { name: 'Select' }).click()
       screen.getByRole('button', { name: 'Events' }).click()
-      screen.getByRole('button', { name: 'Show full' }).click()
       screen.getByRole('button', { name: 'Maximize' }).click()
       screen.getByRole('button', { name: 'Close' }).click()
     })
 
-    expectDetailsState('', 'yaml', false)
+    expectDetailsState('', 'yaml')
   })
 })

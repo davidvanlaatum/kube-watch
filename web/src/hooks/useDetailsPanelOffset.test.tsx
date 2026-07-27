@@ -27,7 +27,6 @@ function OffsetHarness({ isOpen = true, selectionKey = 'pod-1', isMaximized = fa
     isOpen,
     selectionKey,
     detailsTab: 'yaml',
-    showFullDetails: false,
     isMaximized,
     historyLength: 0,
     historyLoading: false,

@@ -6,22 +6,6 @@ export function objectKey(object: any) {
   return metadata.uid || `${metadata.name}/${metadata.namespace || ''}`
 }
 
-export function cleanKubernetesObject(object: any) {
-  const copy = structuredClone(object)
-  if (copy.metadata) {
-    delete copy.metadata.managedFields
-    delete copy.metadata.resourceVersion
-    delete copy.metadata.uid
-    delete copy.metadata.selfLink
-    if (copy.metadata.annotations) {
-      delete copy.metadata.annotations['kubectl.kubernetes.io/last-applied-configuration']
-      delete copy.metadata.annotations['deployment.kubernetes.io/revision']
-      if (Object.keys(copy.metadata.annotations).length === 0) delete copy.metadata.annotations
-    }
-  }
-  return copy
-}
-
 export function logContainerNames(object: any, resource: string, entries: LogEntry[]) {
   const spec = resource === 'deployments' ? object?.spec?.template?.spec : object?.spec
   const names = new Set<string>()

@@ -483,6 +483,9 @@ describe('App', () => {
     modified.type = 'MODIFIED'
     MockEventSource.instances[0].emit(modified)
     expect(await screen.findByRole('row', { name: /Pending/ })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByLabelText('YAML editor')).toHaveTextContent('phase: Pending')
+    })
     await user.click(screen.getByRole('button', { name: 'Maximize details' }))
     expect(screen.getByRole('dialog', { name: 'Pod/api-7d9f' })).toBeInTheDocument()
 
@@ -512,15 +515,14 @@ describe('App', () => {
     resourceStream.emit({ type: 'SYNCED' })
 
     await user.click(await screen.findByRole('row', { name: /api-7d9f/ }))
-    await user.click(screen.getByRole('button', { name: 'Show full YAML' }))
-    expect(screen.getByRole('button', { name: 'Hide housekeeping' })).toBeInTheDocument()
+    expect(await screen.findByLabelText('YAML editor')).toBeInTheDocument()
     await user.click(screen.getByRole('tab', { name: 'Events' }))
     expect(screen.getByRole('tab', { name: 'Events' })).toHaveAttribute('aria-selected', 'true')
 
     await user.click(screen.getByRole('row', { name: /worker-55f8/ }))
     expect(screen.getByRole('heading', { name: 'Pod/worker-55f8' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'YAML' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('button', { name: 'Show full YAML' })).toBeInTheDocument()
+    expect(screen.getByLabelText('YAML editor')).toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'Events' }))
     const deletedApi = podEvent('pod-1', 'api-7d9f')
@@ -528,9 +530,8 @@ describe('App', () => {
     resourceStream.emit(deletedApi)
     expect(screen.getByRole('heading', { name: 'Pod/worker-55f8' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Events' })).toHaveAttribute('aria-selected', 'true')
-
     await user.click(screen.getByRole('tab', { name: 'YAML' }))
-    await user.click(screen.getByRole('button', { name: 'Show full YAML' }))
+    await user.click(screen.getByRole('tab', { name: 'YAML' }))
     await user.click(screen.getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('tab', { name: 'YAML' })).not.toBeInTheDocument()
 

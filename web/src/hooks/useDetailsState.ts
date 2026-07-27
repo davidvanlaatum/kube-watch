@@ -4,12 +4,10 @@ import type { DetailsTab } from '../types'
 export function useDetailsState() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [detailsTab, setDetailsTab] = useState<DetailsTab>('yaml')
-  const [showFullDetails, setShowFullDetails] = useState(false)
   const [isDetailsMaximized, setIsDetailsMaximized] = useState(false)
 
   const resetDetailsView = useCallback(() => {
     setDetailsTab('yaml')
-    setShowFullDetails(false)
     setIsDetailsMaximized(false)
   }, [])
 
@@ -31,8 +29,6 @@ export function useDetailsState() {
     setSelectedKey,
     detailsTab,
     setDetailsTab,
-    showFullDetails,
-    setShowFullDetails,
     isDetailsMaximized,
     setIsDetailsMaximized,
     resetDetailsView,

@@ -14,7 +14,7 @@ import { useResourceStream } from '../hooks/useResourceStream'
 import { emptyFilters, hasActiveFilters, labelSuggestions, matchesFilters, statusSuggestions } from '../resourceFilters'
 import { resourceDefinition, resourceRegistry } from '../resourceRegistry'
 import { nextSort, sortItems } from '../resourceSort'
-import { cleanKubernetesObject, formatLogTimestamp, logEntryKey, objectKey } from '../resourceUtils'
+import { formatLogTimestamp, logEntryKey, objectKey } from '../resourceUtils'
 import type { DetailsTab, SortState, TableFilters } from '../types'
 
 type KubeWatchBodyProps = {
@@ -34,8 +34,6 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
     setSelectedKey,
     detailsTab,
     setDetailsTab,
-    showFullDetails,
-    setShowFullDetails,
     isDetailsMaximized,
     setIsDetailsMaximized,
     resetDetailsView,
@@ -83,7 +81,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
     loading: helmHistoryLoading,
     error: helmHistoryError,
   } = useHelmHistory(ctx, resource, selectedItem, detailsTab)
-  const detailsItem = selectedItem && (showFullDetails ? selectedItem : cleanKubernetesObject(selectedItem))
+  const detailsItem = selectedItem
   const supportsEvents = Boolean(selectedItem && definition.supports.events)
   const {
     sortedEvents: sortedSelectedEvents,
@@ -116,7 +114,6 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
     isOpen: Boolean(selectedItem),
     selectionKey: selectedKey,
     detailsTab,
-    showFullDetails,
     isMaximized: isDetailsMaximized,
     historyLength: helmHistory.length,
     historyLoading: helmHistoryLoading,
@@ -183,10 +180,6 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
           supportsEvents,
           supportsLogs,
           supportsHistory,
-        }}
-        yaml={{
-          showFull: showFullDetails,
-          onToggleFull: () => setShowFullDetails(prev => !prev),
         }}
         events={{
           columns: resourceRegistry.events.columns,

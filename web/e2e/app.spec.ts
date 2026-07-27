@@ -274,6 +274,52 @@ test('renders Helm release table and history drawer', async ({ page }) => {
   await expect(page.locator('.details-table')).toBeVisible()
 })
 
+test('keeps detail actions visible for long resource names', async ({ page }) => {
+  const originalName = pod.metadata.name
+  pod.metadata.name = `api-${'a'.repeat(80)}`
+  try {
+    await page.goto('/')
+    await page.getByRole('combobox', { name: 'Context' }).click()
+    await page.getByRole('option', { name: /dev/ }).click()
+    const row = page.getByRole('row', { name: /api-/ })
+    await expect(row).toBeVisible()
+    await row.getByText(pod.metadata.name, { exact: true }).click()
+
+    await expect(page.getByRole('heading', { name: `Pod/${pod.metadata.name}` })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Maximize details' })).toBeVisible()
+    await page.getByRole('button', { name: 'Maximize details' }).click()
+    await expect(page.getByRole('button', { name: 'Restore details size' })).toBeVisible()
+    await page.getByRole('button', { name: 'Restore details size' }).click()
+    await expect(page.getByRole('button', { name: 'Maximize details' })).toBeVisible()
+  } finally {
+    pod.metadata.name = originalName
+  }
+})
+
+test('keeps detail actions visible while scrolling YAML', async ({ page }) => {
+  const originalContainers = pod.spec.containers
+  pod.spec.containers = Array.from({ length: 80 }, (_, index) => ({ name: `container-${index}` }))
+  try {
+    await page.goto('/')
+    await page.getByRole('combobox', { name: 'Context' }).click()
+    await page.getByRole('option', { name: /dev/ }).click()
+    const row = page.getByRole('row', { name: /api-7d9f/ })
+    await expect(row).toBeVisible()
+    await row.click()
+    await page.getByRole('button', { name: 'Maximize details' }).click()
+
+    const editorScroller = page.locator('.details-panel-maximized .cm-scroller')
+    await expect.poll(async () => editorScroller.evaluate(element => element.scrollHeight - element.clientHeight)).toBeGreaterThan(0)
+    await editorScroller.evaluate(element => { element.scrollTop = element.scrollHeight })
+    await page.waitForTimeout(1_000)
+
+    await expect.poll(async () => editorScroller.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+    await expect(page.getByRole('button', { name: 'Restore details size' })).toBeVisible()
+  } finally {
+    pod.spec.containers = originalContainers
+  }
+})
+
 test('renders pod table, copy feedback, YAML details, events, and logs tab', async ({ page }, testInfo) => {
   const theme = screenshotTheme(testInfo)
   await page.goto('/')
@@ -299,12 +345,32 @@ test('renders pod table, copy feedback, YAML details, events, and logs tab', asy
 
   await row.click()
   await expect(page.getByRole('heading', { name: 'Pod/api-7d9f' })).toBeVisible()
-  await expect(page.getByText('managedFields')).not.toBeVisible()
-  await expect(page.getByText('nodeName: node-a')).toBeVisible()
+  await expect(page.getByLabel('YAML editor')).toContainText('managedFields')
+  await expect(page.locator('.cm-foldPlaceholder')).toBeVisible()
+  await expect(page.getByLabel('YAML editor')).toContainText('nodeName')
+  const editor = page.getByLabel('YAML editor')
+  await editor.focus()
+  for (let line = 0; line < 6; line += 1) await page.keyboard.press('ArrowDown')
+  const isMac = await page.evaluate(() => navigator.platform.includes('Mac'))
+  await page.keyboard.press(isMac ? 'Meta+Alt+]' : 'Control+Shift+]')
+  await expect(editor).toContainText('manager: ignored')
+  await page.keyboard.press(isMac ? 'Meta+Alt+[' : 'Control+Shift+[')
+  await expect(page.locator('.cm-foldPlaceholder')).toBeVisible()
+  const findShortcut = isMac ? 'Meta+f' : 'Control+f'
+  await page.keyboard.press(findShortcut)
+  await expect(page.locator('.cm-search')).toBeVisible()
+  await page.keyboard.press('Escape')
   await page.waitForTimeout(300)
+  const [normalDrawer, normalEditor] = await Promise.all([
+    page.locator('.details-panel:not(.details-panel-maximized)').boundingBox(),
+    page.locator('.details-panel:not(.details-panel-maximized) .yaml-editor').boundingBox(),
+  ])
+  expect((normalEditor?.y || 0) + (normalEditor?.height || 0)).toBeLessThanOrEqual(
+    (normalDrawer?.y || 0) + (normalDrawer?.height || 0),
+  )
   await captureReadmeScreenshot(page, 'details-yaml.png', theme)
-  await maximizeAndExpectExpanded(page, 'pre')
-  await expect(page.locator('.details-panel pre')).toBeVisible()
+  await maximizeAndExpectExpanded(page, '.yaml-editor')
+  await expect(page.locator('.details-panel .yaml-editor')).toBeVisible()
 
   await page.getByRole('tab', { name: 'Events' }).click()
   await expect(page.getByText('Started container api')).toBeVisible()

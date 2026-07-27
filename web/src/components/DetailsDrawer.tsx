@@ -25,9 +25,9 @@ import {
 } from '@mui/material'
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { RefObject } from 'react'
-import { stringify } from 'yaml'
 import { JsonLogMessage } from './JsonLogMessage'
 import { RelativeAge } from './RelativeAge'
+import { YamlEditor } from './YamlEditor'
 import type { Column, DetailsTab, LogEntry } from '../types'
 
 const minimumHighlightedLogEntries = 200
@@ -57,11 +57,6 @@ type DetailsTabs = {
 type DetailsView = {
   isMaximized: boolean
   onToggleMaximized: () => void
-}
-
-type YamlDetails = {
-  showFull: boolean
-  onToggleFull: () => void
 }
 
 type EventsDetails = {
@@ -102,7 +97,6 @@ type DetailsDrawerProps = {
   selection: DetailsSelection
   view: DetailsView
   tabs: DetailsTabs
-  yaml: YamlDetails
   events: EventsDetails
   history: HistoryDetails
   logs: LogsDetails
@@ -113,13 +107,13 @@ export function DetailsDrawer({
   selection,
   view,
   tabs,
-  yaml,
   events,
   history,
   logs,
   formatters,
 }: DetailsDrawerProps) {
   const { item, key, resource, detailsItem, panelRef, onClose } = selection
+  const detailsTitle = `${item?.kind || resource}/${item?.metadata?.name || key}`
   const maximizeButtonRef = useRef<HTMLButtonElement | null>(null)
   const logScrollTopRef = useRef(0)
   const wasMaximized = useRef(view.isMaximized)
@@ -145,14 +139,14 @@ export function DetailsDrawer({
       slotProps={{
         paper: {
           ref: panelRef,
-          className: `details-panel${view.isMaximized ? ' details-panel-maximized' : ''}`,
+          className: `details-panel details-panel-${tabs.active}${view.isMaximized ? ' details-panel-maximized' : ''}`,
           'aria-labelledby': 'details-drawer-title',
           sx: {
             right: 12,
             bottom: 12,
             left: 12,
             width: 'auto',
-            height: view.isMaximized ? 'calc(100vh - 24px)' : 'auto',
+            height: view.isMaximized ? 'calc(100vh - 24px)' : tabs.active === 'yaml' ? '42vh' : 'auto',
             maxHeight: view.isMaximized ? 'calc(100vh - 24px)' : '42vh',
             borderRadius: 2,
             overflow: 'hidden',
@@ -163,15 +157,17 @@ export function DetailsDrawer({
       {item && (
         <Box component="section" className="details-content" aria-label="Selected resource details">
           <Box className="details-header">
-            <Typography id="details-drawer-title" variant="subtitle1" component="h2" sx={{ fontWeight: 700 }}>
-              {item.kind || resource}/{item.metadata?.name || key}
-            </Typography>
-            <Stack direction="row" spacing={1}>
-              {tabs.active === 'yaml' && (
-                <Button size="small" variant="outlined" type="button" onClick={yaml.onToggleFull}>
-                  {yaml.showFull ? 'Hide housekeeping' : 'Show full YAML'}
-                </Button>
-              )}
+          <Typography
+            id="details-drawer-title"
+            variant="subtitle1"
+            component="h2"
+            noWrap
+            title={detailsTitle}
+            sx={{ flex: '1 1 auto', minWidth: 0, fontWeight: 700 }}
+          >
+            {detailsTitle}
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
               <Tooltip title={view.isMaximized ? 'Restore details size' : 'Maximize details'}>
                 <IconButton
                   size="small"
@@ -196,7 +192,7 @@ export function DetailsDrawer({
             {tabs.supportsLogs && <Tab value="logs" label="Logs" />}
             {tabs.supportsHistory && <Tab value="history" label="History" />}
           </Tabs>
-          {tabs.active === 'yaml' && <pre>{stringify(detailsItem)}</pre>}
+          {tabs.active === 'yaml' && <YamlEditor key={`${resource}:${key}`} value={detailsItem} />}
           {tabs.active === 'history' && tabs.supportsHistory && (
             <HistoryTab details={history} />
           )}

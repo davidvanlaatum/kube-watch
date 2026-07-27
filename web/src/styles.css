@@ -145,12 +145,23 @@ tr:hover .copy-name {
   display: flex;
   gap: 8px;
 }
-.details-panel pre {
-  margin: 0;
-  padding: 12px;
-  max-height: 32vh;
-  overflow: auto;
-  user-select: text;
+.yaml-editor {
+  min-height: 0;
+}
+.details-panel-yaml:not(.details-panel-maximized) .details-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.details-panel-yaml:not(.details-panel-maximized) .details-header,
+.details-panel-yaml:not(.details-panel-maximized) .details-content > .MuiTabs-root {
+  flex: 0 0 auto;
+}
+.details-panel-yaml:not(.details-panel-maximized) .yaml-editor {
+  flex: 1 1 auto;
+  height: auto;
+  overflow: hidden;
 }
 .details-table {
   max-height: 28vh;
@@ -166,18 +177,30 @@ tr:hover .copy-name {
   padding: 0 12px 12px;
 }
 .details-panel-maximized .details-content {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   position: absolute;
   inset: 0;
   min-height: 0;
 }
-.details-panel-maximized .details-content > pre,
+.details-panel-maximized .details-header,
+.details-panel-maximized .details-content > .MuiTabs-root {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
+}
+.details-panel-maximized .yaml-editor,
 .details-panel-maximized .event-details,
 .details-panel-maximized .log-details {
+  flex: 1 1 auto;
   min-height: 0;
   max-height: none;
-  height: 100%;
+  height: auto;
+}
+.details-panel-maximized .yaml-editor {
+  overflow: hidden;
+  position: relative;
+  z-index: 0;
 }
 .details-panel-maximized .event-details,
 .details-panel-maximized .log-details {
