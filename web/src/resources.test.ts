@@ -68,6 +68,11 @@ const expectedResources = {
     columns: ['name', 'podSelector', 'age'],
     supports: { events: true, logs: false, history: false, statusFilter: false },
   },
+  virtualservices: {
+    kind: 'VirtualService',
+    columns: ['name', 'gateways', 'hosts', 'age'],
+    supports: { events: true, logs: false, history: false, statusFilter: false },
+  },
   events: {
     kind: undefined,
     columns: ['lastSeen', 'type', 'reason', 'object', 'message'],

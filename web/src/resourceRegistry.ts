@@ -78,6 +78,11 @@ export const resourceRegistry = {
     columns: resourceColumns.networkpolicies,
     supports: { events: true, logs: false, history: false, statusFilter: false },
   },
+  virtualservices: {
+    kind: 'VirtualService',
+    columns: resourceColumns.virtualservices,
+    supports: { events: true, logs: false, history: false, statusFilter: false },
+  },
   events: {
     columns: resourceColumns.events,
     supports: { events: false, logs: false, history: false, statusFilter: true },

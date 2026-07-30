@@ -102,6 +102,12 @@ export const resourceColumns: Record<string, Column[]> = {
     column('podSelector', 'POD-SELECTOR', object => labelSelector(object.spec?.podSelector), { sortValue: object => labelSelector(object.spec?.podSelector) }),
     column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
   ],
+  virtualservices: [
+    column('name', 'NAME', name, { sortValue: nameSortValue }),
+    column('gateways', 'GATEWAYS', virtualServiceGateways, { sortValue: virtualServiceGateways }),
+    column('hosts', 'HOSTS', virtualServiceHosts, { sortValue: virtualServiceHosts }),
+    column('age', 'AGE', age, { align: 'right', sortValue: creationTimestampSortValue }),
+  ],
   events: [
     column('lastSeen', 'LAST SEEN', eventLastSeen, { align: 'right', sortValue: eventTimestamp }),
     column('type', 'TYPE', object => object.type || '', { sortValue: object => object.type || '' }),
@@ -281,6 +287,16 @@ function labelSelector(selector?: any) {
   const labels = selector?.matchLabels || {}
   const parts = Object.entries(labels).map(([key, value]) => `${key}=${value}`)
   return parts.length ? parts.join(',') : '<none>'
+}
+
+function virtualServiceGateways(object: any) {
+  const gateways = object.spec?.gateways || []
+  return gateways.length ? gateways.join(',') : '<none>'
+}
+
+function virtualServiceHosts(object: any) {
+  const hosts = object.spec?.hosts || []
+  return hosts.length ? hosts.join(',') : '<none>'
 }
 
 function hpaTargets(object: any) {

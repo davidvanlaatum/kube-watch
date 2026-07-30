@@ -88,7 +88,7 @@ Release build:
 
 Notes & next steps
 - Current implementation is a prototype: watches use dynamic client and basic list-then-watch logic with in-memory resume.
-- It supports: pods, deployments, statefulsets, replicasets, services, jobs, cronjobs, horizontal pod autoscalers, configmaps, secrets, serviceaccounts, poddisruptionbudgets, networkpolicies, events, and read-only Helm releases.
+- It supports: pods, deployments, statefulsets, replicasets, services, jobs, cronjobs, horizontal pod autoscalers, configmaps, secrets, serviceaccounts, poddisruptionbudgets, networkpolicies, Istio VirtualServices, events, and read-only Helm releases.
 - Logs are supported for pods and deployments. Pod logs stream every container in the selected pod. Deployment logs watch all currently matching pods, start following new matching pods, stop following removed pods, and group output by container name with pod-name prefixes.
 - Helm releases are listed from the selected context's configured namespace only. The backend watches Helm-looking Secrets and ConfigMaps as invalidation signals, then refreshes with Helm's list/history actions. This supports the default Helm secrets storage driver and Helm configmap storage.
 - Improvements: add informer factories, backpressure, per-resource rate limiting, authentication fallback, UI filters, and optional persisted snapshots.

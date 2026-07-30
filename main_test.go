@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 )
@@ -149,6 +150,17 @@ func TestParseTailLinesDefaultsAndCaps(t *testing.T) {
 		if got := parseTailLines(tc.value); got != tc.want {
 			t.Fatalf("parseTailLines(%q) = %d, expected %d", tc.value, got, tc.want)
 		}
+	}
+}
+
+func TestSupportedResourcesIncludesIstioVirtualServices(t *testing.T) {
+	want := schema.GroupVersionResource{
+		Group:    "networking.istio.io",
+		Version:  "v1",
+		Resource: "virtualservices",
+	}
+	if got := supportedResources["virtualservices"]; got != want {
+		t.Fatalf("virtualservices GVR = %#v, want %#v", got, want)
 	}
 }
 

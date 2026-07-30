@@ -47,6 +47,7 @@ var supportedResources = map[string]schema.GroupVersionResource{
 	"serviceaccounts":      {Group: "", Version: "v1", Resource: "serviceaccounts"},
 	"poddisruptionbudgets": {Group: "policy", Version: "v1", Resource: "poddisruptionbudgets"},
 	"networkpolicies":      {Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"},
+	"virtualservices":      {Group: "networking.istio.io", Version: "v1", Resource: "virtualservices"},
 	"events":               {Group: "", Version: "v1", Resource: "events"},
 }
 
