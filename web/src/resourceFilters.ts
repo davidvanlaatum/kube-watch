@@ -54,7 +54,10 @@ export function matchesFilters(resource: string, object: any, filters: TableFilt
   if (!labelsMatch(object, filters.labels)) return false
 
   if (filters.podRestartsOnly && resource === 'pods' && podRestartCount(object) === 0) return false
-  if (filters.notReadyOnly && (resource === 'pods' || resource === 'deployments' || resource === 'statefulsets') && isReady(resource, object)) return false
+  if (filters.notReadyOnly && (resource === 'pods' || resource === 'deployments' || resource === 'statefulsets')) {
+    if (isReady(resource, object)) return false
+    if (resource === 'pods' && object.status?.phase === 'Succeeded') return false
+  }
   return true
 }
 
