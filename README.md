@@ -1,5 +1,5 @@
 ![Go Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/davidvanlaatum/b4f56efa2428740a17cdf241c5c700c1/raw/coverage.json)
-![Frontend Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/davidvanlaatum/b4f56efa2428740a17cdf241c5c700c1/raw/kube-watch-lcov-coverage.json)
+![Frontend Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fdavidvanlaatum%2Fb4f56efa2428740a17cdf241c5c700c1%2Fraw%2Fkube-watch-lcov-coverage.json&label=Frontend%20Coverage)
 
 kube-watch — prototype
 
