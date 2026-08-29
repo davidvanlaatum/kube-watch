@@ -35,6 +35,8 @@ Runbook (dev/test)
 - Release builds inject version metadata through GoReleaser ldflags; keep `/api/version` and the UI update notice working when changing release config.
 - `kube-watch selfupdate` downloads GitHub Release assets, verifies `checksums.txt`, and replaces the current executable on macOS/Linux; Windows updates are manual archive replacement. Keep this flow tested when release asset naming changes.
 - Run checks before committing runtime changes: prefer `go test -race ./...` where possible, then from `/web` run `npm run typecheck`, `npm run test:unit`, `npm run test:e2e`, and relevant builds.
+- Go coverage is reported in CI with pull-request comments and a provisional 30% threshold, and the badge is updated through the dedicated coverage Gist. Treat coverage reductions in changed areas as review findings even while the aggregate threshold is intentionally low. Frontend coverage is a separate task.
+- Go lint findings are currently informational while the existing baseline is cleaned up; do not add new findings in changed code.
 
 Testing guidance
 - Add Vitest tests for component logic and Playwright tests for user-visible browser behavior.
@@ -47,10 +49,12 @@ Escalation & Questions
 
 Pull requests & commits
 - Make small, reviewable changes. Use descriptive commit messages. Include Co-authored-by trailer for Copilot commits when requested.
+- Start implementation from an up-to-date `main` and use a focused feature branch; do not commit directly to `main` unless explicitly requested.
 - Immediately `git add` every newly created file that is intended to be committed, so untracked files cannot be omitted from validation, review, or release changes.
 - Before committing, check README.md, PLAN.md, and agent instructions for stale setup steps, resource lists, limitations, or troubleshooting guidance.
 - For non-trivial direct agent changes, run a pre-commit review pass even when no PR is created. Cover these lenses: Senior Go/TypeScript (Go concurrency, locking, channels, watch lifecycle; TypeScript/React hook dependencies, EventSource lifecycle, browser routing, UI state consistency, and error handling), Senior QA (regression coverage, browser/SSE/log behavior), Kubernetes/ops (RBAC, kubeconfig, GKE exec plugin, resourceVersion semantics), Security (credentials, self-update, TLS, redaction), and Release/docs (GoReleaser, versions, install/upgrade docs). Use the PR template when a PR is created.
 - Fix actionable in-scope review findings before committing, re-run relevant validation, and repeat the review/fix/validate loop until no actionable in-scope feedback remains. If any review feedback is not actioned, call it out with the reason.
+- Keep pull requests draft until required validation and review feedback are complete; mark them ready only after the latest commit has passing CI.
 
 Contact points
 - Provide logs, failing test output, and steps to reproduce with any bug report.

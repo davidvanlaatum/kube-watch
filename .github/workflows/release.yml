@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v*.*.*"
 
 permissions:
   contents: write
@@ -22,6 +22,20 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: stable
+
+      - name: Validate release tag
+        run: |
+          if ! printf '%s\n' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Release tags must match vX.Y.Z, got: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+      - name: Validate GoReleaser configuration
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
 
       - name: Set up Node
         uses: actions/setup-node@v7
