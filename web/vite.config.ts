@@ -30,5 +30,17 @@ export default defineConfig(({mode}) => ({
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
     setupFiles: './src/test/setup.ts',
+    testTimeout: 15_000,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'json-summary', 'json', 'lcov'],
+      reportOnFailure: true,
+      thresholds: {
+        statements: 50,
+        branches: 35,
+        functions: 40,
+        lines: 50,
+      },
+    },
   }
 }))

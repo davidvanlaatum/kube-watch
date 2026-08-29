@@ -56,7 +56,7 @@ jobs:
         working-directory: web
 
       - name: Run web unit tests
-        run: npm run test:unit
+        run: npm run test:unit:coverage
         working-directory: web
 
       - name: Install Playwright browsers

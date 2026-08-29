@@ -51,8 +51,15 @@ jobs:
         working-directory: web
 
       - name: Run web unit tests
-        run: npm run test:unit
+        run: npm run test:unit:coverage
         working-directory: web
+
+      - name: Report frontend coverage on pull request
+        if: always()
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          working-directory: web
+          name: Frontend
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
@@ -79,3 +86,11 @@ jobs:
           label: Go Coverage
           message: ${{ steps.coverage.outputs.coverage-pct-1dp }}%
           color: ${{ steps.coverage.outputs.meets-threshold == 'true' && 'green' || 'red' }}
+
+      - name: Update frontend coverage badge
+        if: github.ref == 'refs/heads/main'
+        uses: gaelgirodon/ci-badges-action@v1
+        with:
+          gist-id: b4f56efa2428740a17cdf241c5c700c1
+          token: ${{ secrets.COVERAGE_GIST_SECRET }}
+          prefix: kube-watch
