@@ -1,4 +1,5 @@
 ![Go Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/davidvanlaatum/b4f56efa2428740a17cdf241c5c700c1/raw/coverage.json)
+![Frontend Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/davidvanlaatum/b4f56efa2428740a17cdf241c5c700c1/raw/kube-watch-lcov-coverage.json)
 
 kube-watch — prototype
 
@@ -66,7 +67,7 @@ Tests:
    cd web
    npm ci
    npm run typecheck
-   npm run test:unit
+   npm run test:unit:coverage
    npx playwright install chromium
    npm run test:e2e
 
@@ -74,6 +75,7 @@ CI:
 - GitHub Actions runs on pushes to `main` and pull requests.
 - CI runs Go tests with the race detector, web type-checking, Vitest unit tests, Playwright Chromium tests, the Vite production build, and the final Go binary build with embedded web assets.
 - CI measures Go statement coverage, posts coverage details to pull requests, and updates the current Go coverage badge from `main`. The initial Go coverage threshold is 30% while coverage is expanded; frontend coverage is tracked separately.
+- CI posts a frontend Vitest coverage summary to pull requests and updates the frontend coverage badge from `main` using the same coverage Gist.
 - The coverage badge workflow requires the `COVERAGE_GIST_SECRET` GitHub Actions secret with permission to update the dedicated [coverage Gist](https://gist.github.com/davidvanlaatum/b4f56efa2428740a17cdf241c5c700c1).
 
 Review process:
@@ -127,5 +129,6 @@ Agent / operator instructions
   npm run dev
 
 - Playwright tests start the Vite dev server automatically and mock API/SSE responses for deterministic UI coverage.
+- `npm run test:unit:coverage` runs the Vitest suite with V8 coverage, prints a text summary, writes an HTML report to `web/coverage/`, and enforces provisional minimums of 50% statements/lines, 40% functions, and 35% branches. Playwright coverage remains a separate browser-test concern.
 
 Next planned improvements include CLI flags for log level, snapshot persistence, and multi-namespace selection.

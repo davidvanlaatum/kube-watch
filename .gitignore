@@ -11,6 +11,7 @@ web/dist/*
 !web/dist/placeholder.txt
 web/playwright-report/
 web/test-results/
+web/coverage/
 # ignore local dev certs and logs
 certs/
 *.log
