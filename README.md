@@ -1,3 +1,5 @@
+![Go Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/davidvanlaatum/b4f56efa2428740a17cdf241c5c700c1/raw/coverage.json)
+
 kube-watch — prototype
 
 Overview
@@ -71,6 +73,8 @@ Tests:
 CI:
 - GitHub Actions runs on pushes to `main` and pull requests.
 - CI runs Go tests with the race detector, web type-checking, Vitest unit tests, Playwright Chromium tests, the Vite production build, and the final Go binary build with embedded web assets.
+- CI measures Go statement coverage, posts coverage details to pull requests, and updates the current Go coverage badge from `main`. The initial Go coverage threshold is 30% while coverage is expanded; frontend coverage is tracked separately.
+- The coverage badge workflow requires the `COVERAGE_GIST_SECRET` GitHub Actions secret with permission to update the dedicated [coverage Gist](https://gist.github.com/davidvanlaatum/b4f56efa2428740a17cdf241c5c700c1).
 
 Review process:
 - For direct agent-assisted changes, run the same review lenses before committing even when no PR is created.

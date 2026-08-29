@@ -13,6 +13,9 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -33,8 +36,15 @@ jobs:
         run: npm ci
         working-directory: web
 
-      - name: Run Go tests
-        run: go test -race ./...
+      - name: Measure Go coverage and comment on pull request
+        uses: gwatts/go-coverage-action@v2
+        id: coverage
+        with:
+          coverage-threshold: 30
+          cover-mode: atomic
+          cover-pkg: ./...
+          test-args: '["-v", "-race"]'
+          notes-ref: gocoverage-stable
 
       - name: Type-check web
         run: npm run typecheck
@@ -58,3 +68,14 @@ jobs:
 
       - name: Build Go binary
         run: go build -o kube-watch .
+
+      - name: Update coverage badge
+        if: github.ref == 'refs/heads/main'
+        uses: schneegans/dynamic-badges-action@v1.9.0
+        with:
+          auth: ${{ secrets.COVERAGE_GIST_SECRET }}
+          gistID: b4f56efa2428740a17cdf241c5c700c1
+          filename: coverage.json
+          label: Go Coverage
+          message: ${{ steps.coverage.outputs.coverage-pct-1dp }}%
+          color: ${{ steps.coverage.outputs.meets-threshold == 'true' && 'green' || 'red' }}
