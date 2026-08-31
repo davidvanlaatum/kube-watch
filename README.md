@@ -90,11 +90,11 @@ Release build:
 - GoReleaser runs `npm ci --prefix web` and `npm run build --prefix web` before compiling so released binaries embed the production UI from `web/dist`.
 - GoReleaser injects version, commit, and build date into the binary. The UI reads `/api/version` and links to the latest GitHub Release when a newer version is available.
 - Release artifacts are built for Linux, macOS, and Windows on amd64 and arm64, with checksums uploaded to the GitHub Release.
-- To update an installed binary in place on macOS/Linux, run `kube-watch selfupdate`. It downloads the latest compatible GitHub Release asset, verifies it against `checksums.txt`, and replaces the current executable. Use `kube-watch selfupdate --force` to reinstall the latest release even when the current version is not older. On Windows, download the latest archive and replace `kube-watch.exe` manually.
+- To update an installed binary in place on macOS/Linux, run `kube-watch selfupdate`. It downloads the latest compatible GitHub Release asset, verifies it against `checksums.txt`, and replaces the current executable. This is an integrity check only: the checksum file is downloaded from the same release and is not independently authenticated by a signature. Verify release provenance or signatures separately when stronger supply-chain assurance is required. Use `kube-watch selfupdate --force` to reinstall the latest release even when the current version is not older. On Windows, download the latest archive and replace `kube-watch.exe` manually.
 
 Maintainer release flow:
 - Choose the candidate tag using the [release number policy](PLAN.md#release-number-policy): patch releases contain backward-compatible fixes, minor releases add compatible capabilities (and carry pre-`1.0.0` breaking changes), and major releases break the stable contract after `1.0.0`.
-- Before choosing the exact version, creating a release PR, creating a tag, or pushing a tag, confirm the version and release scope with the operator. A completed PR or green CI does not authorize publishing.
+- Before choosing the exact version, creating a release PR, creating a tag, or pushing a tag, confirm the version and release scope with the operator. A completed PR or green CI does not authorize publishing. Repository administration must protect `v*` tags and require approval on the release environment; the tag must point to the exact reviewed `main` commit.
 - From an up-to-date `main`, run the validation relevant to the release and push the exact authorized `vX.Y.Z` tag. The tag workflow validates the release and runs GoReleaser.
 
 Notes & next steps
