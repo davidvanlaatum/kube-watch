@@ -94,7 +94,7 @@ Release build:
 
 Maintainer release flow:
 - Choose the candidate tag using the [release number policy](PLAN.md#release-number-policy), based on the externally observable behavior rather than the size of the diff alone or dependency versions: patch releases contain backward-compatible fixes, minor releases add compatible capabilities (and carry pre-`1.0.0` breaking changes), and major releases break the stable contract after `1.0.0`.
-- Before choosing the exact version, creating a release PR, creating a tag, or pushing a tag, confirm the version and release scope with the operator. A completed PR or green CI does not authorize publishing. Repository administration must protect `v*` tags and require approval on the release environment; the tag must point to the exact reviewed `main` commit.
+- Before choosing the exact version, creating a release PR, creating a tag, or pushing a tag, confirm the version and release scope with the operator. A completed PR or green CI does not authorize publishing. The release workflow requires the protected `release` environment and rejects tags that do not point to the exact current `main` commit. Repository administration must protect `v*` tags and configure approval on that environment.
 - From an up-to-date `main`, run the validation relevant to the release and push the exact authorized `vX.Y.Z` tag. The tag workflow validates the release and runs GoReleaser.
 
 Notes & next steps

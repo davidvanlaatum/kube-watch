@@ -12,6 +12,7 @@ jobs:
   goreleaser:
     name: GoReleaser
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -27,6 +28,17 @@ jobs:
         run: |
           if ! printf '%s\n' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "Release tags must match vX.Y.Z, got: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+      - name: Validate release commit
+        run: |
+          git fetch origin main --quiet
+          main_sha="$(git rev-parse origin/main)"
+          if [ "$GITHUB_SHA" != "$main_sha" ]; then
+            echo "Release tag must point to the exact current main commit" >&2
+            echo "tag:  $GITHUB_SHA" >&2
+            echo "main: $main_sha" >&2
             exit 1
           fi
 
