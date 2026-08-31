@@ -45,6 +45,16 @@ Key design decisions
 - Kubeconfig loading: client-go default loading rules are used so `$KUBECONFIG` multi-file configs and fallback to `~/.kube/config` behave like kubectl.
 - Exec plugin support: clientcmd.NewNonInteractiveDeferredLoadingClientConfig is used so exec plugins (gke-gcloud-auth-plugin) work, but the host must have gcloud and valid credentials (gcloud auth login) for GKE contexts.
 
+Release number policy
+
+- Release tags use `vMAJOR.MINOR.PATCH`. Choose the increment from the externally observable `kube-watch` behavior, not from the size of the diff or the Go/Kubernetes dependency versions.
+- Patch (`X.Y.(Z+1)`) is for backward-compatible bug fixes, security fixes, documentation-only changes, dependency or toolchain updates, packaging fixes, and internal implementation changes.
+- Minor (`X.(Y+1).0`) is for backward-compatible capabilities such as new resources, UI features, CLI/configuration options, or optional output additions. Before `1.0.0`, breaking changes also use the minor component (`0.Y.0`); the `0.0.Z` line remains patch-only.
+- Major (`(X+1).0.0`) is for breaking changes after `1.0.0`, including removing or renaming public CLI options, changing required inputs or output meanings, changing authentication or safety requirements incompatibly, or dropping a documented compatibility target. `1.0.0` is the first stable release and may establish the stable contract without requiring a prior `0.x` major release.
+- Introduce deprecations in a minor release and document them for at least one subsequent minor release before removal, unless a security or operational emergency requires otherwise. If a release contains several categories, use the highest applicable increment.
+- Before selecting an exact version, creating a release PR, creating a tag, or pushing a tag, confirm the intended version and release scope with the operator. Do not infer release authorization from a completed PR, green CI, or a request to prepare release documentation.
+- Releases are tag-driven through GitHub Actions and GoReleaser. Pushing a valid `vX.Y.Z` tag runs the release validation and publishes the platform binaries. The workflow requires the protected `release` environment and rejects tags that do not point to the exact current `main` commit. Repository administration must protect `v*` tags and configure approval on that environment so operator authorization is enforced at publication time. Pre-release and build metadata tags are not part of the current publishing policy.
+
 Current status (2026-07-07)
 
 - Implemented: context discovery, namespaced list+watch, SSE endpoint, shared WatchManager, in-memory snapshot cache, frontend UI and proxy.
