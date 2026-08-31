@@ -92,6 +92,11 @@ Release build:
 - Release artifacts are built for Linux, macOS, and Windows on amd64 and arm64, with checksums uploaded to the GitHub Release.
 - To update an installed binary in place on macOS/Linux, run `kube-watch selfupdate`. It downloads the latest compatible GitHub Release asset, verifies it against `checksums.txt`, and replaces the current executable. Use `kube-watch selfupdate --force` to reinstall the latest release even when the current version is not older. On Windows, download the latest archive and replace `kube-watch.exe` manually.
 
+Maintainer release flow:
+- Choose the candidate tag using the [release number policy](PLAN.md#release-number-policy): patch releases contain backward-compatible fixes, minor releases add compatible capabilities (and carry pre-`1.0.0` breaking changes), and major releases break the stable contract after `1.0.0`.
+- Before choosing the exact version, creating a release PR, creating a tag, or pushing a tag, confirm the version and release scope with the operator. A completed PR or green CI does not authorize publishing.
+- From an up-to-date `main`, run the validation relevant to the release and push the exact authorized `vX.Y.Z` tag. The tag workflow validates the release and runs GoReleaser.
+
 Notes & next steps
 - Current implementation is a prototype: watches use dynamic client and basic list-then-watch logic with in-memory resume.
 - It supports: pods, deployments, statefulsets, replicasets, services, jobs, cronjobs, horizontal pod autoscalers, configmaps, secrets, serviceaccounts, poddisruptionbudgets, networkpolicies, Istio VirtualServices, events, and read-only Helm releases.
