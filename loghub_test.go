@@ -42,6 +42,28 @@ func TestBrowserLogHubPublishesErrorRecords(t *testing.T) {
 	}
 }
 
+func TestBrowserLogHandlerDelegatesToNextHandler(t *testing.T) {
+	hub := newBrowserLogHub()
+	next := slog.NewTextHandler(io.Discard, nil)
+	handler := &browserLogHandler{next: next, hub: hub}
+
+	if got := handler.Enabled(context.Background(), slog.LevelInfo); got != next.Enabled(context.Background(), slog.LevelInfo) {
+		t.Fatalf("Enabled() = %v, want %v", got, next.Enabled(context.Background(), slog.LevelInfo))
+	}
+
+	withAttrs := handler.WithAttrs([]slog.Attr{slog.String("k", "v")})
+	wrapped, ok := withAttrs.(*browserLogHandler)
+	if !ok || wrapped.hub != hub {
+		t.Fatalf("WithAttrs() = %#v, expected *browserLogHandler sharing the same hub", withAttrs)
+	}
+
+	withGroup := handler.WithGroup("g")
+	groupWrapped, ok := withGroup.(*browserLogHandler)
+	if !ok || groupWrapped.hub != hub {
+		t.Fatalf("WithGroup() = %#v, expected *browserLogHandler sharing the same hub", withGroup)
+	}
+}
+
 func TestBrowserLogHandlerIgnoresNonErrorRecords(t *testing.T) {
 	hub := newBrowserLogHub()
 	ch, unsubscribe := hub.subscribe()
