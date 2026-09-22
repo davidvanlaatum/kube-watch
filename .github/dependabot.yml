@@ -26,7 +26,7 @@ updates:
       timezone: Australia/Adelaide
     open-pull-requests-limit: 5
     cooldown:
-      default-days: 3
+      default-days: 1
     groups:
       web-dependencies:
         patterns:
@@ -41,7 +41,7 @@ updates:
       timezone: Australia/Adelaide
     open-pull-requests-limit: 5
     cooldown:
-      default-days: 3
+      default-days: 1
     groups:
       github-actions:
         patterns:
