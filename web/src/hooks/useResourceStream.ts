@@ -11,6 +11,7 @@ export function useResourceStream(ctx: string, resource: string, { onReset, onSe
   const [items, setItems] = useState<Map<string, any>>(new Map())
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const itemsRef = useRef<Map<string, any>>(new Map())
   const esRef = useRef<EventSource | null>(null)
 
   useEffect(() => {
@@ -19,7 +20,8 @@ export function useResourceStream(ctx: string, resource: string, { onReset, onSe
       esRef.current = null
     }
 
-    setItems(new Map())
+    itemsRef.current = new Map()
+    setItems(itemsRef.current)
     setLoadError(null)
     onReset()
 
@@ -35,24 +37,31 @@ export function useResourceStream(ctx: string, resource: string, { onReset, onSe
     es.onmessage = (ev) => {
       try {
         const env: Envelope = JSON.parse(ev.data)
-        if (env.type === 'ADDED' || env.type === 'MODIFIED') {
+        if (env.type === 'SNAPSHOT' && Array.isArray(env.objects)) {
+          const next = new Map(env.objects.map(object => [objectKey(object), object]))
+          for (const key of itemsRef.current.keys()) {
+            if (!next.has(key)) onSelectedDeleted(key)
+          }
+          itemsRef.current = next
+          setItems(next)
+          setIsLoading(false)
+          setLoadError(null)
+        } else if (env.type === 'ADDED' || env.type === 'MODIFIED') {
           setIsLoading(false)
           setLoadError(null)
           const uid = objectKey(env.object)
-          setItems(prev => {
-            const next = new Map(prev)
-            next.set(uid, env.object)
-            return next
-          })
+          const next = new Map(itemsRef.current)
+          next.set(uid, env.object)
+          itemsRef.current = next
+          setItems(next)
         } else if (env.type === 'DELETED') {
           setIsLoading(false)
           setLoadError(null)
           const uid = objectKey(env.object)
-          setItems(prev => {
-            const next = new Map(prev)
-            next.delete(uid)
-            return next
-          })
+          const next = new Map(itemsRef.current)
+          next.delete(uid)
+          itemsRef.current = next
+          setItems(next)
           onSelectedDeleted(uid)
         } else if (env.type === 'SYNCED') {
           setIsLoading(false)

@@ -400,3 +400,21 @@ test('renders pod table, copy feedback, YAML details, events, and logs tab', asy
   await copyButton.click()
   await expect(row.getByText('Copied')).toBeVisible()
 })
+
+
+test('replacement snapshots remove rows after a missed deletion', async ({ page }) => {
+  await page.route('**/sse/dev/pods', async route => {
+    await route.fulfill({
+      contentType: 'text/event-stream',
+      body: [
+        { type: 'ADDED', object: pod },
+        { type: 'SNAPSHOT', objects: [] },
+        { type: 'SYNCED' },
+      ].map(event => `data: ${JSON.stringify(event)}\n\n`).join(''),
+    })
+  })
+  await page.goto('/view/dev/pods')
+  await expect(page.getByRole('table')).toBeVisible()
+  await expect(page.getByRole('status')).toHaveCount(0)
+  await expect(page.getByRole('row', { name: /api-7d9f/ })).toHaveCount(0)
+})

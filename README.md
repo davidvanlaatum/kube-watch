@@ -98,7 +98,7 @@ Maintainer release flow:
 - From an up-to-date `main`, run the validation relevant to the release and push the exact authorized `vX.Y.Z` tag. The tag workflow validates the release and runs GoReleaser.
 
 Notes & next steps
-- Current implementation is a prototype: watches use dynamic client and basic list-then-watch logic with in-memory resume.
+- Current implementation is a prototype: watches use dynamic client and basic list-then-watch logic with in-memory snapshots and periodic reconciliation.
 - It supports: pods, deployments, statefulsets, replicasets, services, jobs, cronjobs, horizontal pod autoscalers, configmaps, secrets, serviceaccounts, poddisruptionbudgets, networkpolicies, Istio VirtualServices, events, and read-only Helm releases.
 - Logs are supported for pods and deployments. Pod logs stream every container in the selected pod. Deployment logs watch all currently matching pods, start following new matching pods, stop following removed pods, and group output by container name with pod-name prefixes.
 - Helm releases are listed from the selected context's configured namespace only. The backend watches Helm-looking Secrets and ConfigMaps as invalidation signals, then refreshes with Helm's list/history actions. This supports the default Helm secrets storage driver and Helm configmap storage.
@@ -111,9 +111,9 @@ Troubleshooting & operational notes
 
 - kubeconfig loading: the backend uses client-go default loading rules, so it honors `$KUBECONFIG` including multiple files separated by the OS path-list separator (`:` on macOS/Linux) and falls back to `~/.kube/config`.
 
-- Snapshot cache behavior: the backend maintains an in-memory snapshot per (context,resource,namespace). When a new browser client subscribes it immediately receives the last-known ADDED/MODIFIED objects (so refreshing the page repopulates state). The snapshot is memory-resident and lost when the server restarts.
+- Snapshot cache behavior: the backend maintains an in-memory snapshot per (context,resource,namespace). For Kubernetes resource streams, a new browser subscription receives a complete SNAPSHOT that replaces the displayed set, including when it is empty. The snapshot is memory-resident and lost when the server restarts.
 
-- Reconnect behavior: watches are namespaced (per-context default namespace) to match RBAC-limited users. The server attempts to resume using resourceVersion when possible and re-lists on 410/Expired. Forbidden list/watch failures are treated as terminal for that subscription and surfaced to the UI.
+- Reconnect behavior for Kubernetes resource streams: watches are namespaced (per-context default namespace) to match RBAC-limited users. The server lists current state before every Kubernetes watch connection and reconciles active watches every ten minutes. Each list establishes the resourceVersion for the following watch. Complete snapshots replace browser state on SSE reconnect and after reconciliation; full subscriber queues are replaced with a current snapshot rather than silently dropping deletions. Forbidden list/watch failures are treated as terminal for that subscription and surfaced to the UI.
 
 - Helm RBAC: the Helm releases view needs list/watch permissions for Secrets and ConfigMaps in the configured namespace, plus read access compatible with Helm list/history for whichever Helm storage driver is in use. Missing Secret or ConfigMap permissions are surfaced in the UI and backend logs.
 

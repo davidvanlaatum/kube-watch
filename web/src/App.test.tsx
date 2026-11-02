@@ -176,6 +176,22 @@ describe('App', () => {
     vi.unstubAllGlobals()
   })
 
+  it('replaces stale rows after SSE recovery, including empty snapshots', async () => {
+    window.history.replaceState(null, '', '/view/dev/pods')
+    render(<App />)
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    const stream = MockEventSource.instances[0]
+    act(() => stream.emit(podEvent('stale', 'stale-pod')))
+    expect(await screen.findByRole('row', { name: /stale-pod/ })).toBeInTheDocument()
+    act(() => stream.emitError())
+    act(() => stream.emit({ type: 'SNAPSHOT', objects: [podEvent('current', 'current-pod').object] }))
+    expect(await screen.findByRole('row', { name: /current-pod/ })).toBeInTheDocument()
+    expect(screen.queryByRole('row', { name: /stale-pod/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('Connection interrupted; waiting for EventSource to reconnect')).not.toBeInTheDocument()
+    act(() => stream.emit({ type: 'SNAPSHOT', objects: [] }))
+    expect(screen.queryByRole('row', { name: /current-pod/ })).not.toBeInTheDocument()
+  })
+
   it('restores context and resource from the URL route', async () => {
     window.history.replaceState(null, '', '/view/dev/events')
     render(<App />)
@@ -744,6 +760,9 @@ describe('App', () => {
 
     expect(MockEventSource.instances.filter(instance => instance.url === '/sse/dev/events')).toHaveLength(eventStreamCount)
     expect(eventStream.closed).toBe(false)
+    act(() => eventStream.emit({ type: 'SNAPSHOT', objects: [] }))
+    expect(screen.queryByRole('row', { name: /Successfully pulled image/ })).not.toBeInTheDocument()
+    expect(screen.getByText('No events found for this resource.')).toBeInTheDocument()
   })
 
   it('streams logs in container tabs with pod prefixes', async () => {

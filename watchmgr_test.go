@@ -303,3 +303,36 @@ func TestTerminalRunExitDoesNotRestartWithActiveClients(t *testing.T) {
 		t.Fatal("expected entry to be marked stopped after terminal run exit")
 	}
 }
+
+func TestSubscribeQueuesSnapshotBeforeLiveDeletion(t *testing.T) {
+	entry := &watchEntry{clients: make(map[chan []byte]struct{}), running: true, cache: map[string][]byte{
+		"pod-1": []byte(`{"type":"ADDED","object":{"metadata":{"uid":"pod-1"}}}`),
+	}}
+	ch, unsub, _, _ := entry.subscribe(true)
+	defer unsub()
+	entry.broadcast([]byte(`{"type":"DELETED","object":{"metadata":{"uid":"pod-1"}}}`))
+	if got := eventType(t, receiveUpdate(t, ch)); got != "SNAPSHOT" {
+		t.Fatalf("first event = %s", got)
+	}
+	receiveUpdate(t, ch) // SYNCED
+	if got := eventType(t, receiveUpdate(t, ch)); got != "DELETED" {
+		t.Fatalf("live event = %s", got)
+	}
+}
+
+func TestSlowSubscriberReceivesReplacementAfterMissedDeletion(t *testing.T) {
+	ch := make(chan []byte, 1)
+	entry := &watchEntry{clients: map[chan []byte]struct{}{ch: {}}, cache: make(map[string][]byte)}
+	entry.broadcast([]byte(`{"type":"ADDED","object":{"metadata":{"uid":"pod-1"}}}`))
+	entry.broadcast([]byte(`{"type":"DELETED","object":{"metadata":{"uid":"pod-1"}}}`))
+	var snapshot struct {
+		Type    string            `json:"type"`
+		Objects []json.RawMessage `json:"objects"`
+	}
+	if err := json.Unmarshal(receiveUpdate(t, ch), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Type != "SNAPSHOT" || snapshot.Objects == nil || len(snapshot.Objects) != 0 {
+		t.Fatalf("expected empty replacement snapshot: %+v", snapshot)
+	}
+}

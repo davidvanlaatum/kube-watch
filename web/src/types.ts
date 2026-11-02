@@ -12,7 +12,7 @@ export type VersionInfo = {
   checkError?: string
 }
 
-export type Envelope = { type?: string; object?: any; error?: string; info?: string }
+export type Envelope = { type?: string; object?: any; objects?: any[]; error?: string; info?: string }
 
 export type BackendLogEnvelope = {
   type?: string

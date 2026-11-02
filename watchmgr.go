@@ -24,12 +24,13 @@ type WatchManager struct {
 }
 
 type watchEntry struct {
-	cluster   string
-	resource  string
-	namespace string
-	gvr       schema.GroupVersionResource
-	dyn       dynamic.Interface
-	lastRV    string
+	cluster        string
+	resource       string
+	namespace      string
+	gvr            schema.GroupVersionResource
+	dyn            dynamic.Interface
+	lastRV         string
+	resyncInterval time.Duration // zero uses the default ten-minute interval
 
 	clients map[chan []byte]struct{}
 	cache   map[string][]byte // uid -> last ADDED/MODIFIED event bytes
@@ -136,18 +137,13 @@ func (m *WatchManager) newEntry(cluster string, gvr schema.GroupVersionResource)
 
 func (e *watchEntry) subscribe(sendSnapshot bool) (chan []byte, func(), chan struct{}, bool) {
 	ch := make(chan []byte, e.subscriptionBuffer(sendSnapshot))
-	done := make(chan struct{})
 	var once sync.Once
 
-	cacheSnapshot, terminalError, clientCount, stopCh, shouldStart := e.addClient(ch, sendSnapshot)
+	_, _, clientCount, stopCh, shouldStart := e.addClient(ch, sendSnapshot)
 	slog.Info("sse subscription opened", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "clients", clientCount)
-	if sendSnapshot {
-		go sendInitialSnapshot(ch, done, cacheSnapshot, terminalError)
-	}
 
 	unsubscribe := func() {
 		once.Do(func() {
-			close(done)
 			clientCount := e.removeClient(ch)
 			slog.Info("sse subscription closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "clients", clientCount)
 		})
@@ -190,6 +186,14 @@ func (e *watchEntry) addClient(ch chan []byte, includeSnapshot bool) ([][]byte, 
 	cacheSnapshot := make([][]byte, 0, len(e.cache))
 	for _, v := range e.cache {
 		cacheSnapshot = append(cacheSnapshot, v)
+	}
+	// Queue the snapshot while registration is locked so live events cannot
+	// overtake it and then be overwritten by stale snapshot data.
+	ch <- e.snapshotLocked()
+	if e.terminalError != nil {
+		ch <- e.terminalError
+	} else {
+		ch <- syncedEvent
 	}
 	return cacheSnapshot, e.terminalError, clientCount, e.stopCh, shouldStart
 }
@@ -294,6 +298,7 @@ func (e *watchEntry) run(stopCh chan struct{}) {
 			for _, deleted := range e.deleteMissingCached(currentKeys) {
 				e.broadcast(deleted)
 			}
+			e.broadcastSnapshot()
 			e.broadcast(syncedEvent)
 		} else {
 			slog.Error("namespaced initial list failed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "error", err)
@@ -357,11 +362,22 @@ func (e *watchEntry) run(stopCh chan struct{}) {
 		}
 		slog.Info("cluster watch opened", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "resourceVersion", opts.ResourceVersion)
 
+		interval := e.resyncInterval
+		if interval <= 0 {
+			interval = 10 * time.Minute
+		}
+		resync := time.NewTimer(interval)
 		ch := watcher.ResultChan()
 		running := true
 		for running {
 			select {
+			case <-resync.C:
+				running = false
+				watcher.Stop()
+				watchCancel()
+				slog.Info("reconciling cluster watch", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource)
 			case <-stopCh:
+				resync.Stop()
 				running = false
 				watcher.Stop()
 				watchCancel()
@@ -413,6 +429,7 @@ func (e *watchEntry) run(stopCh chan struct{}) {
 				e.broadcast(b)
 			}
 		}
+		resync.Stop()
 		watchCancel()
 		// small pause before re-establishing
 		select {
@@ -512,7 +529,17 @@ func (e *watchEntry) broadcast(msg []byte) {
 		select {
 		case ch <- msg:
 		default:
-			// drop if the client is slow
+			// Replace queued deltas with current state instead of silently losing
+			// a deletion. The channel has capacity and this is its only sender
+			// while mu is held.
+			drainSubscriber(ch)
+			ch <- e.snapshotLocked()
+			if envelope.Type != "ADDED" && envelope.Type != "MODIFIED" && envelope.Type != "DELETED" {
+				select {
+				case ch <- msg:
+				default:
+				}
+			}
 		}
 	}
 }
@@ -587,4 +614,43 @@ func contextForStop(stopCh <-chan struct{}) (context.Context, context.CancelFunc
 		}
 	}()
 	return ctx, cancel
+}
+
+// snapshotLocked returns one complete replacement, including an empty set.
+func (e *watchEntry) snapshotLocked() []byte {
+	objects := make([]json.RawMessage, 0, len(e.cache))
+	for _, msg := range e.cache {
+		var event struct {
+			Object json.RawMessage `json:"object"`
+		}
+		if json.Unmarshal(msg, &event) == nil && len(event.Object) > 0 {
+			objects = append(objects, event.Object)
+		}
+	}
+	msg, _ := json.Marshal(map[string]interface{}{"type": "SNAPSHOT", "objects": objects})
+	return msg
+}
+
+func drainSubscriber(ch chan []byte) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
+func (e *watchEntry) broadcastSnapshot() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	msg := e.snapshotLocked()
+	for ch := range e.clients {
+		select {
+		case ch <- msg:
+		default:
+			drainSubscriber(ch)
+			ch <- msg
+		}
+	}
 }
