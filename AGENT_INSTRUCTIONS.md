@@ -28,7 +28,7 @@ Runbook (dev/test)
 - Start backend: go run .
 - Start frontend (dev): cd web && npm install && npm run dev
 - Use the Vite dev server for browser/headless testing; it proxies API/SSE/log requests to the Go backend.
-- Check backend structured slog output on stdout; Vite dev server logs are available from `npm run dev`.
+- Check backend structured slog output on stderr; console colour is detected automatically and disabled by a non-empty `NO_COLOR` or `TERM=dumb`. Vite dev server logs are available from `npm run dev`.
 - Kubeconfig loading should use client-go default loading rules so `$KUBECONFIG` multi-file setups match kubectl behavior.
 - Pod/Deployment log streaming uses `/logs/{context}/{resource}/{namespace}/{name}` and should preserve multiple-container behavior with container tabs.
 - Table filtering is client-side; keep name/status/label filters and resource-specific quick toggles consistent with displayed table semantics.
