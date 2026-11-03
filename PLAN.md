@@ -10,7 +10,7 @@ Goals
 
 - Provide a simple, low-friction UI to observe live Kubernetes objects scoped to contexts and namespaces the user can access.
 - Support kubeconfig exec plugins (gke-gcloud-auth-plugin) for GKE contexts.
-- Be resilient to transient watch failures and reconnect cleanly, delivering a consistent view to clients.
+- Be resilient to transient watch failures and reconnect cleanly, delivering a consistent view to clients through replacement snapshots and ten-minute Kubernetes reconciliation.
 
 Scope (prototype)
 
@@ -27,7 +27,7 @@ Architecture
   - HTTP(S) server: endpoints
     - /api/contexts => [{name, namespace}, ...]
     - /api/version => build metadata plus latest GitHub release update status
-    - /sse/{context}/{resource} => SSE event stream (ADDED/MODIFIED/DELETED + info/error messages)
+    - /sse/{context}/{resource} => SSE event stream (SNAPSHOT/ADDED/MODIFIED/DELETED/SYNCED + info/error messages)
     - /logs/{context}/{resource}/{namespace}/{name}?tailLines=200 => SSE event stream for pod/deployment logs
     - CLI command `selfupdate` on macOS/Linux => download latest compatible release, verify checksum, and replace the current binary
   - TLS: self-signed certs in ./certs for local HTTPS; the server binds to loopback by default.
@@ -41,7 +41,7 @@ Key design decisions
 - Dynamic client + unstructured: supports many resources without generating typed clients.
 - Namespaced default: respecting RBAC is a priority; the backend reads context default namespace and watches that namespace. If cluster-list is permitted, cluster-scoped list/watch can be used (previous behavior) but the default avoids Forbidden errors.
 - Shared watches: one watch per (context,resource,namespace) reduces duplicate API calls when multiple UI clients connect.
-- In-memory snapshot cache: new subscribers receive the latest ADDED/MODIFIED events so UI refresh/population works even if the watch started earlier.
+- In-memory snapshot cache: new Kubernetes resource subscribers receive a complete replacement snapshot so reconnects remove stale objects even if the watch started earlier.
 - Kubeconfig loading: client-go default loading rules are used so `$KUBECONFIG` multi-file configs and fallback to `~/.kube/config` behave like kubectl.
 - Exec plugin support: clientcmd.NewNonInteractiveDeferredLoadingClientConfig is used so exec plugins (gke-gcloud-auth-plugin) work, but the host must have gcloud and valid credentials (gcloud auth login) for GKE contexts.
 

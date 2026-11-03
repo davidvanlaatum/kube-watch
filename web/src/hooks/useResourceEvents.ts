@@ -45,6 +45,15 @@ export function useResourceEvents(ctx: string, resource: string, selectedItem: a
     es.onmessage = (ev) => {
       try {
         const env: Envelope = JSON.parse(ev.data)
+        if (env.type === 'SNAPSHOT' && Array.isArray(env.objects)) {
+          setEvents(new Map(env.objects
+            .filter(object => eventMatchesResource(object, selectedResource, resource))
+            .map(object => [objectKey(object), object])))
+          window.clearTimeout(emptyEventsTimer)
+          setLoading(false)
+          setError(null)
+          return
+        }
         if (env.type === 'SYNCED') {
           window.clearTimeout(emptyEventsTimer)
           setLoading(false)
