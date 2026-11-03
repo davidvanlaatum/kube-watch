@@ -3,7 +3,7 @@ module kube-watch
 go 1.27.0
 
 require (
-	github.com/davidvanlaatum/dvgoutils v0.1.0
+	github.com/davidvanlaatum/dvgoutils v0.1.1
 	helm.sh/helm/v3 v3.22.1
 	k8s.io/api v0.37.2
 	k8s.io/apimachinery v0.37.2
