@@ -97,7 +97,7 @@ Agent / Operator instructions (runbook)
   2. Start backend (prefer interactive):
      go mod tidy
      go run .
-     # Logs will print to stdout; use this for debugging exec plugin failures and watch errors.
+     # Logs print to stderr with automatic terminal colour; use this for debugging exec plugin failures and watch errors.
   3. Start frontend dev server:
      cd web
      npm install

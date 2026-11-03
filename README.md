@@ -105,7 +105,7 @@ Notes & next steps
 - Improvements: add informer factories, backpressure, per-resource rate limiting, authentication fallback, UI filters, and optional persisted snapshots.
 
 Troubleshooting & operational notes
-- Logs: run the backend interactively with `go run .` to see structured slog output on stdout (recommended). Watch/subscription open/close, forbidden access, and reconnect conditions are logged with cluster, namespace, and resource fields.
+- Logs: run the backend interactively with `go run .` to see structured slog output on stderr (recommended). Console logs use `dvgoutils/logging/colour` to enable colour automatically for terminals; redirected output stays plain. Set a non-empty `NO_COLOR` or `TERM=dumb` to disable automatic colour. Watch/subscription open/close, forbidden access, and reconnect conditions are logged with cluster, namespace, and resource fields.
 
 - gke / gcloud auth: contexts that use `gke-gcloud-auth-plugin` require the plugin and `gcloud` credentials accessible to the Go process. Install the plugin with `gcloud components install gke-gcloud-auth-plugin` when needed, then run `gcloud auth login` before starting the backend so the exec plugin can obtain tokens.
 

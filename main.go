@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/davidvanlaatum/dvgoutils/logging/colour"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
@@ -53,7 +54,7 @@ var supportedResources = map[string]schema.GroupVersionResource{
 
 func main() {
 	slog.SetDefault(slog.New(&browserLogHandler{
-		next: slog.NewTextHandler(os.Stderr, nil),
+		next: colour.NewHandler(os.Stderr, nil),
 		hub:  backendLogHub,
 	}))
 
