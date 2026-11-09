@@ -5,6 +5,9 @@ import { join, resolve } from 'node:path'
 const readmeScreenshotDirectory = process.env.UPDATE_README_SCREENSHOTS
   ? resolve(process.cwd(), '../docs/screenshots')
   : null
+const podMetricsScreenshotPath = process.env.POD_METRICS_SCREENSHOT
+  ? resolve(process.env.POD_METRICS_SCREENSHOT)
+  : null
 
 type ScreenshotTheme = 'light' | 'dark'
 
@@ -417,4 +420,67 @@ test('replacement snapshots remove rows after a missed deletion', async ({ page 
   await expect(page.getByRole('table')).toBeVisible()
   await expect(page.getByRole('status')).toHaveCount(0)
   await expect(page.getByRole('row', { name: /api-7d9f/ })).toHaveCount(0)
+})
+
+test('renders separate live CPU and memory charts for pod metrics', async ({ page }) => {
+  let sampleIndex = 0
+  await page.route('**/api/pod-metrics/dev', async route => {
+    const index = sampleIndex++
+    const timestamp = new Date(Date.parse('2026-07-08T00:00:00Z') + index * 15_000).toISOString()
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        namespace: 'default',
+        retrievedAt: timestamp,
+        warnings: [],
+        pods: [
+          {
+            name: 'api-7d9f',
+            timestamp,
+            window: '30s',
+            cpuMilliCores: 200 + index * 25,
+            memoryBytes: (64 + index * 4) * 1024 * 1024,
+          },
+          {
+            name: 'worker-5bf8',
+            timestamp,
+            window: '30s',
+            cpuMilliCores: 75 + index * 10,
+            memoryBytes: (96 + index * 2) * 1024 * 1024,
+          },
+        ],
+      }),
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('combobox', { name: 'Context' }).click()
+  await page.getByRole('option', { name: /dev/ }).click()
+  await page.getByRole('combobox', { name: 'Resource' }).click()
+  await page.getByRole('option', { name: 'Pod metrics' }).click()
+
+  await expect(page).toHaveURL('/view/dev/podmetrics')
+  await expect(page.getByRole('heading', { name: 'Pod metrics' })).toBeVisible()
+  await expect(page.getByRole('img', { name: 'CPU usage history by pod' })).toBeVisible()
+  await expect(page.getByRole('img', { name: 'Memory usage history by pod' })).toBeVisible()
+  await expect(page.getByRole('checkbox', { name: 'Graph api-7d9f' })).toBeChecked()
+  const apiRow = page.getByRole('row', { name: /api-7d9f/ })
+  await expect(apiRow).toContainText('200m')
+
+  for (let index = 1; index <= 3; index += 1) {
+    await page.getByRole('button', { name: 'Refresh pod metrics' }).click()
+    await expect(apiRow).toContainText(`${200 + index * 25}m`)
+  }
+  await expect(page.getByTestId('cpu-metrics-chart').locator('svg path')).toHaveCount(2)
+  await expect(page.getByTestId('memory-metrics-chart').locator('svg path')).toHaveCount(2)
+
+  if (podMetricsScreenshotPath && page.context().browser()?.browserType().name() === 'chromium') {
+    await page.screenshot({ path: podMetricsScreenshotPath, fullPage: true })
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const gridColumns = await page.getByTestId('pod-metrics-chart-grid').evaluate(element =>
+    getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
+  )
+  expect(gridColumns).toBe(1)
 })
