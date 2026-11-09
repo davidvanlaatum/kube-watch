@@ -11,7 +11,7 @@ import {
   Toolbar,
   Typography,
 } from '@mui/material'
-import { resourceOptions } from '../resourceRegistry'
+import { resourceLabel, resourceOptions } from '../resourceRegistry'
 import type { ContextInfo, VersionInfo } from '../types'
 
 type AppHeaderProps = {
@@ -72,7 +72,7 @@ export function AppHeader({
               value={resource}
               onChange={event => onResourceChange(event.target.value)}
             >
-              {resourceOptions.map(option => <MenuItem key={option} value={option}>{option}</MenuItem>)}
+              {resourceOptions.map(option => <MenuItem key={option} value={option}>{resourceLabel(option)}</MenuItem>)}
             </Select>
           </FormControl>
         </Stack>

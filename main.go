@@ -103,6 +103,7 @@ func main() {
 	wm := NewWatchManager(loadingRules)
 	hm := NewHelmManager(loadingRules)
 	lm := NewLogManager(loadingRules)
+	pm := newPodMetricsManager(loadingRules)
 	vc := newVersionChecker()
 
 	mux := http.NewServeMux()
@@ -140,6 +141,8 @@ func main() {
 	mux.HandleFunc("/api/backend-logs", func(w http.ResponseWriter, r *http.Request) {
 		streamBackendLogs(w, r)
 	})
+
+	mux.Handle("/api/pod-metrics/", newPodMetricsHandler(pm))
 
 	mux.HandleFunc("/api/helm-history/", func(w http.ResponseWriter, r *http.Request) {
 		// URL format: /api/helm-history/{context}/{driver}/{name}
@@ -291,7 +294,7 @@ func main() {
 	}
 	srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
 
-	slog.Info("server listening", "addr", "https://127.0.0.1:9443", "endpoints", "/api/contexts,/api/version,/sse/{context}/{resource},/logs/{context}/{resource}/{namespace}/{name}")
+	slog.Info("server listening", "addr", "https://127.0.0.1:9443", "endpoints", "/api/contexts,/api/version,/api/pod-metrics/{context},/sse/{context}/{resource},/logs/{context}/{resource}/{namespace}/{name}")
 	if err := srv.ListenAndServeTLS("", ""); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
