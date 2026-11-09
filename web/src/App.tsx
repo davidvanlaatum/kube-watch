@@ -1,6 +1,7 @@
 import { Box, CssBaseline, ThemeProvider, createTheme } from '@mui/material'
 import { AppHeader } from './components/AppHeader'
 import { KubeWatchBody } from './components/KubeWatchBody'
+import { PodMetricsView } from './components/PodMetricsView'
 import { RelativeAgeProvider } from './components/RelativeAge'
 import { useContexts } from './hooks/useContexts'
 import { useVersionInfo } from './hooks/useVersionInfo'
@@ -66,9 +67,13 @@ export default function App() {
           onContextChange={setCtx}
           onResourceChange={setResource}
         />
-        <RelativeAgeProvider>
-          <KubeWatchBody ctx={ctx} resource={resource} />
-        </RelativeAgeProvider>
+        {resource === 'podmetrics'
+          ? <PodMetricsView key={ctx} ctx={ctx} />
+          : (
+            <RelativeAgeProvider>
+              <KubeWatchBody ctx={ctx} resource={resource} />
+            </RelativeAgeProvider>
+          )}
       </Box>
     </ThemeProvider>
   )

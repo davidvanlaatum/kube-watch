@@ -1,6 +1,6 @@
 kube-watch — Project Plan and Agent Instructions
 
-Last updated: 2026-07-07
+Last updated: 2026-11-06
 
 Overview
 
@@ -27,6 +27,7 @@ Architecture
   - HTTP(S) server: endpoints
     - /api/contexts => [{name, namespace}, ...]
     - /api/version => build metadata plus latest GitHub release update status
+    - /api/pod-metrics/{context} => current per-pod CPU and memory from `metrics.k8s.io/v1beta1`, scoped to the context's configured namespace
     - /sse/{context}/{resource} => SSE event stream (SNAPSHOT/ADDED/MODIFIED/DELETED/SYNCED + info/error messages)
     - /logs/{context}/{resource}/{namespace}/{name}?tailLines=200 => SSE event stream for pod/deployment logs
     - CLI command `selfupdate` on macOS/Linux => download latest compatible release, verify checksum, and replace the current binary
@@ -42,6 +43,7 @@ Key design decisions
 - Namespaced default: respecting RBAC is a priority; the backend reads context default namespace and watches that namespace. If cluster-list is permitted, cluster-scoped list/watch can be used (previous behavior) but the default avoids Forbidden errors.
 - Shared watches: one watch per (context,resource,namespace) reduces duplicate API calls when multiple UI clients connect.
 - In-memory snapshot cache: new Kubernetes resource subscribers receive a complete replacement snapshot so reconnects remove stale objects even if the watch started earlier.
+- Pod metrics: a separate selectable view reads the Kubernetes Metrics API (the source used by `kubectl top pod`) in the active context's configured namespace. The browser polls every 15 seconds and draws CPU and memory as separate charts; up to eight pods may be charted at once, while the current metrics table keeps all API results. History is session-local, limited to the most recent 30 minutes and capped at 120 source-timestamped points per selected pod, and discarded when the view closes or context changes. Missing metrics remain unavailable rather than being represented as zero, and chart lines break across unavailable metrics or source-timestamp gaps.
 - Kubeconfig loading: client-go default loading rules are used so `$KUBECONFIG` multi-file configs and fallback to `~/.kube/config` behave like kubectl.
 - Exec plugin support: clientcmd.NewNonInteractiveDeferredLoadingClientConfig is used so exec plugins (gke-gcloud-auth-plugin) work, but the host must have gcloud and valid credentials (gcloud auth login) for GKE contexts.
 
@@ -55,14 +57,15 @@ Release number policy
 - Before selecting an exact version, creating a release PR, creating a tag, or pushing a tag, confirm the intended version and release scope with the operator. Do not infer release authorization from a completed PR, green CI, or a request to prepare release documentation.
 - Releases are tag-driven through GitHub Actions and GoReleaser. Pushing a valid `vX.Y.Z` tag runs the release validation and publishes the platform binaries. The workflow requires the protected `release` environment and rejects tags that do not point to the exact current `main` commit. Repository administration must protect `v*` tags and configure approval on that environment so operator authorization is enforced at publication time. Pre-release and build metadata tags are not part of the current publishing policy.
 
-Current status (2026-07-07)
+Current status (2026-11-06)
 
 - Implemented: context discovery, namespaced list+watch, SSE endpoint, shared WatchManager, in-memory snapshot cache, frontend UI and proxy.
-- Working: client-go/kubectl-style kubeconfig loading, contexts listing, stable context ordering, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, client-side table filters, Vite dev proxy for local testing, embedded production UI, YAML/details panel with resource-scoped events, Pod/Deployment logs with per-container tabs, build-time version display with GitHub update checks, macOS/Linux `selfupdate` release installation, structured slog lifecycle logs.
+- Working: client-go/kubectl-style kubeconfig loading, contexts listing, stable context ordering, SSE streaming for namespaced resources, immediate snapshot delivery to new subscribers, client-side table filters, Vite dev proxy for local testing, embedded production UI, YAML/details panel with resource-scoped events, Pod/Deployment logs with per-container tabs, namespaced Pod CPU/memory metrics with separate in-memory history charts, build-time version display with GitHub update checks, macOS/Linux `selfupdate` release installation, structured slog lifecycle logs.
 - CI: GitHub Actions runs Go tests, TypeScript type-checking, Vitest unit tests, Playwright Chromium tests, Vite build, and final Go binary build.
 - Known limitations:
   - Snapshot is memory-only (lost on restart).
   - Multi-namespace cluster-wide view is limited when cluster-list is forbidden — current behavior watches the context default namespace.
+  - Pod metrics require a working Metrics Server and namespace-scoped `list` permission for `pods.metrics.k8s.io`; chart history exists only in browser memory while the view is open.
   - Exec plugin requires interactive gcloud credentials if tokens expired; the backend cannot prompt — run `gcloud auth login` before starting.
 
 Project milestones & plan

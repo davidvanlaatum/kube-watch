@@ -7,6 +7,7 @@ Overview
 - Go backend: discovers kubeconfig contexts, opens watches to clusters/resources and exposes SSE endpoints over HTTPS (self-signed certs in ./certs).
 - Vite + React frontend: proxies /api, /sse, and /logs during development and is embedded into the Go binary from web/dist for production.
 - Pod and Deployment details include a Logs tab that tails all containers, defaults to the last 200 lines, and live-follows new log lines.
+- The Pod metrics view reads `metrics.k8s.io` for the selected context's configured namespace and plots CPU and memory history separately on the same page. It refreshes every 15 seconds, uses the same metrics source as `kubectl top pod`, and keeps a bounded in-memory history only while the view is open.
 - Helm releases are exposed as a read-only synthetic resource with release status, chart/app versions, revision, update time, and revision history in the details drawer.
 - Released binaries include build-time version metadata and the UI checks GitHub for newer releases.
 - Resource tables include client-side filters for name, status, labels, and resource-specific quick toggles such as pod restarts and readiness.
@@ -120,6 +121,8 @@ Troubleshooting & operational notes
 - Secret visibility: kube-watch intentionally renders Kubernetes Secret objects, including `data` and `stringData`, in the details YAML for users whose current kubeconfig context is authorized to read them. This is part of the local/operator inspection use case. Treat the browser session as sensitive, do not share it broadly, and do not copy Secret contents into issues, logs, commits, or third-party systems.
 
 - Log streaming: `/logs/{context}/{resource}/{namespace}/{name}?tailLines=200` streams Server-Sent Events for pod/deployment logs. The UI lets you change `tailLines` up to 5000 and keeps following live output.
+
+- Pod metrics: `/api/pod-metrics/{context}` queries the `metrics.k8s.io/v1beta1` Pod Metrics API in the namespace configured for that kubeconfig context. The Pod metrics resource view shows CPU and memory in separate charts, plus current per-pod values. It refreshes every 15 seconds and keeps timestamped history from the most recent 30 minutes, capped at 120 points per selected pod; history stays in browser memory and is discarded when the view closes or the context changes. Up to eight chart series can be selected at once; the table still shows every pod returned by the API. Missing or partial metrics are shown as unavailable rather than zero, and chart lines break across unavailable metrics or source-timestamp gaps. The Kubernetes Metrics Server must be installed and the active context must have permission to list `pods.metrics.k8s.io` in its configured namespace.
 
 - Self-update: on macOS/Linux, `kube-watch selfupdate` checks `https://github.com/davidvanlaatum/kube-watch/releases/latest`, selects the archive matching the current OS/architecture, verifies the SHA-256 checksum from the release, and swaps the running executable path. If installed in a protected directory, rerun with the permissions required to replace that file. Windows self-update is not supported; replace `kube-watch.exe` manually from the latest release archive.
 

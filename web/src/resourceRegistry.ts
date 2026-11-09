@@ -18,6 +18,10 @@ export const resourceRegistry = {
     columns: resourceColumns.pods,
     supports: { events: true, logs: true, history: false, statusFilter: true },
   },
+  podmetrics: {
+    columns: [],
+    supports: { events: false, logs: false, history: false, statusFilter: false },
+  },
   deployments: {
     kind: 'Deployment',
     columns: resourceColumns.deployments,
@@ -98,6 +102,10 @@ export type ResourceName = keyof typeof resourceRegistry
 
 export const resourceOptions = Object.keys(resourceRegistry) as ResourceName[]
 export const defaultResource: ResourceName = 'pods'
+
+export function resourceLabel(resource: string) {
+  return resource === 'podmetrics' ? 'Pod metrics' : resource
+}
 
 export function resourceDefinition(resource: string): ResourceDefinition | undefined {
   return resourceRegistry[resource as ResourceName]

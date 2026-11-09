@@ -8,6 +8,11 @@ const expectedResources = {
     columns: ['name', 'ready', 'status', 'restarts', 'age', 'node'],
     supports: { events: true, logs: true, history: false, statusFilter: true },
   },
+  podmetrics: {
+    kind: undefined,
+    columns: [],
+    supports: { events: false, logs: false, history: false, statusFilter: false },
+  },
   deployments: {
     kind: 'Deployment',
     columns: ['name', 'ready', 'updated', 'available', 'age'],

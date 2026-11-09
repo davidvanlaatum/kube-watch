@@ -12,6 +12,7 @@ Primary Objectives
 1. Ensure the Go backend reliably lists and watches namespaced Kubernetes resources and provides an in-memory snapshot for new subscribers.
 2. Keep the Vite + React frontend simple: connect to SSE, render a "top" view, and handle reconnects/fresh snapshots.
 3. Support resource details including YAML, events, and Pod/Deployment logs while maintaining Go, Vitest, and Playwright test coverage.
+4. Support Pod CPU and memory monitoring through `metrics.k8s.io`, scoped to the selected context's configured namespace; keep chart history bounded and ephemeral.
 
 What agents may do
 - Modify Go code in the repository root and frontend code under /web to fix bugs and add features per the project plan.
@@ -42,6 +43,7 @@ Runbook (dev/test)
 
 Testing guidance
 - Add Vitest tests for component logic and Playwright tests for user-visible browser behavior.
+- Pod metrics tests must use mocked Kubernetes API responses and verify namespace scoping, aggregation, cancellation, polling cleanup, and empty/error UI states; do not require a live cluster.
 - Use mocked API/SSE streams for deterministic UI tests unless the task specifically requires a real cluster.
 - Keep tests targeted and fast.
 
