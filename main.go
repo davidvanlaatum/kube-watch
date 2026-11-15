@@ -105,12 +105,35 @@ func main() {
 	lm := NewLogManager(loadingRules)
 	vc := newVersionChecker()
 
-	mux := http.NewServeMux()
 	distFS, err := fs.Sub(embeddedDist, "web/dist")
 	if err != nil {
 		slog.Error("failed to load embedded frontend", "error", err)
 		os.Exit(1)
 	}
+	handler := newHTTPHandler(contexts, wm, hm, lm, vc, distFS)
+
+	srv := &http.Server{
+		Addr:    "127.0.0.1:9443",
+		Handler: handler,
+	}
+
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		slog.Error("failed to load TLS certificate", "cert", certPath, "key", keyPath, "error", err)
+		os.Exit(1)
+	}
+	srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+
+	slog.Info("server listening", "addr", "https://127.0.0.1:9443", "endpoints", "/api/contexts,/api/version,/sse/{context}/{resource},/logs/{context}/{resource}/{namespace}/{name}")
+	if err := srv.ListenAndServeTLS("", ""); err != nil {
+		slog.Error("server stopped", "error", err)
+		os.Exit(1)
+	}
+}
+
+// newHTTPHandler builds the same routes for the local server and HTTP tests.
+func newHTTPHandler(contexts []map[string]string, wm *WatchManager, hm *HelmManager, lm *LogManager, vc *versionChecker, distFS fs.FS) http.Handler {
+	mux := http.NewServeMux()
 	fileServer := http.FileServer(http.FS(distFS))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(r.URL.Path, "/")
@@ -279,23 +302,7 @@ func main() {
 		}
 	})
 
-	srv := &http.Server{
-		Addr:    "127.0.0.1:9443",
-		Handler: cors(mux),
-	}
-
-	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
-	if err != nil {
-		slog.Error("failed to load TLS certificate", "cert", certPath, "key", keyPath, "error", err)
-		os.Exit(1)
-	}
-	srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
-
-	slog.Info("server listening", "addr", "https://127.0.0.1:9443", "endpoints", "/api/contexts,/api/version,/sse/{context}/{resource},/logs/{context}/{resource}/{namespace}/{name}")
-	if err := srv.ListenAndServeTLS("", ""); err != nil {
-		slog.Error("server stopped", "error", err)
-		os.Exit(1)
-	}
+	return cors(mux)
 }
 
 func listContexts(cfg *api.Config, loadingRules *clientcmd.ClientConfigLoadingRules) []map[string]string {
