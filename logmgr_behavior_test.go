@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -235,5 +237,47 @@ func TestDeploymentLogSubscriptionClosesWhenTargetMissing(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("stream leaked")
+	}
+}
+
+type logRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f logRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type failingCloseLogBody struct {
+	io.Reader
+	closeErr error
+	closed   bool
+}
+
+func (b *failingCloseLogBody) Close() error { b.closed = true; return b.closeErr }
+
+func TestReadContainerLogsPreservesReadAndCloseErrors(t *testing.T) {
+	for _, brokenRead := range []bool{false, true} {
+		t.Run(fmt.Sprint(brokenRead), func(t *testing.T) {
+			closeErr := errors.New("close failed")
+			payload := "2026-11-15T00:00:00Z hello\n"
+			if brokenRead {
+				payload = strings.Repeat("x", 2*1024*1024)
+			}
+			body := &failingCloseLogBody{Reader: strings.NewReader(payload), closeErr: closeErr}
+			client, err := kubernetes.NewForConfig(&rest.Config{Host: "http://fixture.invalid", Transport: logRoundTripper(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: body}, nil
+			})})
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines, err := readContainerLogs(context.Background(), client, "team", "api", "app", 10)
+			if !body.closed || !errors.Is(err, closeErr) {
+				t.Fatalf("closed=%v, error=%v", body.closed, err)
+			}
+			if brokenRead {
+				if !strings.Contains(err.Error(), "token too long") {
+					t.Fatalf("read error lost: %v", err)
+				}
+			} else if len(lines) != 1 || lines[0].Line != "hello" {
+				t.Fatalf("logs=%+v", lines)
+			}
+		})
 	}
 }

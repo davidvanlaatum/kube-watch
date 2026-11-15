@@ -195,3 +195,56 @@ func TestHTTPRoutesValidateRequestsAndServeFrontend(t *testing.T) {
 		t.Fatalf("cross-origin status %d", w.Code)
 	}
 }
+
+// Simulate a disconnected client before the connection event or a later event.
+type failingStreamWriter struct {
+	*httptest.ResponseRecorder
+	writes int
+	failAt int
+}
+
+func (w *failingStreamWriter) Write(data []byte) (int, error) {
+	w.writes++
+	if w.writes >= w.failAt {
+		return 0, errors.New("client disconnected")
+	}
+	return w.ResponseRecorder.Write(data)
+}
+
+func TestSSEStopsWhenClientWriteFails(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		failAt  int
+		handler func(http.ResponseWriter, *http.Request)
+	}{
+		{"initial resource event", 1, func(w http.ResponseWriter, r *http.Request) { streamSSE(w, r, make(chan []byte)) }},
+		{"later resource event", 2, func(w http.ResponseWriter, r *http.Request) {
+			ch := make(chan []byte, 1)
+			ch <- []byte(`{"type":"SYNCED"}`)
+			streamSSE(w, r, ch)
+		}},
+		{"initial backend event", 1, streamBackendLogs},
+		{"error event", 1, func(w http.ResponseWriter, r *http.Request) { streamSSEError(w, "subscribe", errors.New("denied")) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			w := &failingStreamWriter{ResponseRecorder: httptest.NewRecorder(), failAt: tc.failAt}
+			done := make(chan struct{})
+			go func() { defer close(done); tc.handler(w, httptest.NewRequest("GET", "/", nil).WithContext(ctx)) }()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				cancel()
+				<-done
+				t.Fatal("stream kept waiting after a write failure")
+			}
+			if w.writes != tc.failAt {
+				t.Fatalf("writes=%d, expected %d", w.writes, tc.failAt)
+			}
+			if tc.failAt == 1 && w.Flushed {
+				t.Fatal("failed connection event was flushed")
+			}
+		})
+	}
+}

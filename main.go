@@ -145,19 +145,23 @@ func newHTTPHandler(contexts []map[string]string, wm *WatchManager, hm *HelmMana
 			http.ServeFileFS(w, r, distFS, "index.html")
 			return
 		} else {
-			f.Close()
+			_ = f.Close() // This read-only handle only probes for an embedded asset.
 			fileServer.ServeHTTP(w, r)
 		}
 	})
 
 	mux.HandleFunc("/api/contexts", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(contexts)
+		if err := json.NewEncoder(w).Encode(contexts); err != nil {
+			slog.Warn("failed to write JSON response", "path", r.URL.Path, "error", err)
+		}
 	})
 
 	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(vc.Check(r.Context()))
+		if err := json.NewEncoder(w).Encode(vc.Check(r.Context())); err != nil {
+			slog.Warn("failed to write JSON response", "path", r.URL.Path, "error", err)
+		}
 	})
 
 	mux.HandleFunc("/api/backend-logs", func(w http.ResponseWriter, r *http.Request) {
@@ -192,7 +196,9 @@ func newHTTPHandler(contexts []map[string]string, wm *WatchManager, hm *HelmMana
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(history)
+		if err := json.NewEncoder(w).Encode(history); err != nil {
+			slog.Warn("failed to write JSON response", "path", r.URL.Path, "error", err)
+		}
 	})
 
 	mux.HandleFunc("/sse/", func(w http.ResponseWriter, r *http.Request) {
@@ -277,29 +283,7 @@ func newHTTPHandler(contexts []map[string]string, wm *WatchManager, hm *HelmMana
 		}
 		defer unsub()
 
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		fmt.Fprintf(w, "data: %s\n\n", []byte("{\"info\":\"connected\"}"))
-		flusher.Flush()
-
-		for {
-			select {
-			case <-r.Context().Done():
-				return
-			case b, ok := <-ch:
-				if !ok {
-					return
-				}
-				fmt.Fprintf(w, "data: %s\n\n", b)
-				flusher.Flush()
-			}
-		}
+		streamSSE(w, r, ch)
 	})
 
 	return cors(mux)
@@ -357,7 +341,9 @@ func streamSSE(w http.ResponseWriter, r *http.Request, ch <-chan []byte) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	fmt.Fprintf(w, "data: %s\n\n", []byte("{\"info\":\"connected\"}"))
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", []byte("{\"info\":\"connected\"}")); err != nil {
+		return
+	}
 	flusher.Flush()
 
 	for {
@@ -368,7 +354,9 @@ func streamSSE(w http.ResponseWriter, r *http.Request, ch <-chan []byte) {
 			if !ok {
 				return
 			}
-			fmt.Fprintf(w, "data: %s\n\n", b)
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", b); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 	}
@@ -384,7 +372,9 @@ func streamBackendLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	fmt.Fprintf(w, "data: %s\n\n", []byte("{\"info\":\"connected\"}"))
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", []byte("{\"info\":\"connected\"}")); err != nil {
+		return
+	}
 	flusher.Flush()
 
 	logCh, unsubscribe := backendLogHub.subscribe()
@@ -395,7 +385,9 @@ func streamBackendLogs(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case b := <-logCh:
-			fmt.Fprintf(w, "data: %s\n\n", b)
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", b); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 	}
@@ -411,7 +403,9 @@ func streamSSEError(w http.ResponseWriter, prefix string, err error) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	fmt.Fprintf(w, "data: %s\n\n", errorEvent(prefix, err))
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", errorEvent(prefix, err)); err != nil {
+		return
+	}
 	flusher.Flush()
 }
 
@@ -495,7 +489,7 @@ func generateSelfSignedCert(certPath, keyPath string) error {
 		return err
 	}
 	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
-		certOut.Close()
+		_ = certOut.Close() // Preserve the encoding error; closing is best-effort.
 		return err
 	}
 	if err := certOut.Close(); err != nil {
@@ -507,7 +501,7 @@ func generateSelfSignedCert(certPath, keyPath string) error {
 		return err
 	}
 	if err := pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}); err != nil {
-		keyOut.Close()
+		_ = keyOut.Close() // Preserve the encoding error; closing is best-effort.
 		return err
 	}
 	return keyOut.Close()

@@ -555,7 +555,7 @@ func (e *helmEntry) releaseObject(cfg *action.Configuration, rel *release.Releas
 	status := "unknown"
 	if rel.Info != nil {
 		status = string(rel.Info.Status)
-		updated = rel.Info.LastDeployed.Time.Format(time.RFC3339)
+		updated = rel.Info.LastDeployed.Format(time.RFC3339)
 		description = rel.Info.Description
 	}
 	chartName, chartVersion, appVersion := chartDetails(rel)
@@ -607,7 +607,7 @@ func helmHistory(cfg *action.Configuration, name string) ([]map[string]interface
 		status := "unknown"
 		if rel.Info != nil {
 			status = string(rel.Info.Status)
-			updated = rel.Info.LastDeployed.Time.Format(time.RFC3339)
+			updated = rel.Info.LastDeployed.Format(time.RFC3339)
 			description = rel.Info.Description
 		}
 		chartName, chartVersion, appVersion := chartDetails(rel)
@@ -635,7 +635,7 @@ func firstDeployed(rel *release.Release) string {
 	if rel == nil || rel.Info == nil {
 		return ""
 	}
-	return rel.Info.FirstDeployed.Time.Format(time.RFC3339)
+	return rel.Info.FirstDeployed.Format(time.RFC3339)
 }
 
 func releaseRevision(obj map[string]interface{}) int {

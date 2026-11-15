@@ -35,7 +35,9 @@ func TestVersionCheckerFetchesAndCachesLatestRelease(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"tag_name":"v1.2.4","html_url":"https://github.com/davidvanlaatum/kube-watch/releases/tag/v1.2.4"}`)
+		if _, err := fmt.Fprint(w, `{"tag_name":"v1.2.4","html_url":"https://github.com/davidvanlaatum/kube-watch/releases/tag/v1.2.4"}`); err != nil {
+			t.Errorf("write HTTP fixture: %v", err)
+		}
 	}))
 	defer server.Close()
 

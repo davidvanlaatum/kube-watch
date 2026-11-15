@@ -41,8 +41,8 @@ func runSelfUpdate(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(out, result)
-	return nil
+	_, err = fmt.Fprintln(out, result)
+	return err
 }
 
 type selfUpdater struct {
@@ -140,7 +140,8 @@ func fetchLatestRelease(ctx context.Context, client *http.Client, url string) (l
 	if err != nil {
 		return latestRelease{}, err
 	}
-	defer resp.Body.Close()
+	// Reading/decoding determines success; closing a read-only response is cleanup.
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return latestRelease{}, fmt.Errorf("latest release check returned %s", resp.Status)
 	}
@@ -186,7 +187,8 @@ func downloadReleaseAsset(ctx context.Context, client *http.Client, asset releas
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	// Reading/decoding determines success; closing a read-only response is cleanup.
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("download %s returned %s", asset.Name, resp.Status)
 	}
@@ -231,7 +233,8 @@ func extractBinaryFromTarGz(archiveBytes []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer gz.Close()
+	// The reader wraps an in-memory buffer and owns no external resources.
+	defer func() { _ = gz.Close() }()
 
 	tr := tar.NewReader(gz)
 	for {
@@ -303,18 +306,19 @@ func replaceExecutable(path string, binaryBytes []byte) error {
 		return err
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
+	// Successful replacement renames this path; cleanup may therefore find it missing.
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	mode := info.Mode().Perm()
 	if mode == 0 {
 		mode = 0755
 	}
 	if _, err := tmp.Write(binaryBytes); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // Preserve the write/chmod error.
 		return err
 	}
 	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // Preserve the write/chmod error.
 		return err
 	}
 	if err := tmp.Close(); err != nil {

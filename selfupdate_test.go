@@ -87,18 +87,24 @@ func TestSelfUpdaterDownloadsVerifiesAndReplacesBinary(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/latest":
-			fmt.Fprintf(w, `{
+			if _, err := fmt.Fprintf(w, `{
 				"tag_name": "v1.2.4",
 				"html_url": "https://github.com/davidvanlaatum/kube-watch/releases/tag/v1.2.4",
 				"assets": [
 					{"name": "kube-watch_1.2.4_darwin_arm64.tar.gz", "browser_download_url": "%s/archive"},
 					{"name": "checksums.txt", "browser_download_url": "%s/checksums"}
 				]
-			}`, serverURL(r), serverURL(r))
+			}`, serverURL(r), serverURL(r)); err != nil {
+				t.Errorf("write HTTP fixture: %v", err)
+			}
 		case "/archive":
-			w.Write(archiveBytes)
+			if _, err := w.Write(archiveBytes); err != nil {
+				t.Errorf("write HTTP fixture: %v", err)
+			}
 		case "/checksums":
-			fmt.Fprint(w, checksums)
+			if _, err := fmt.Fprint(w, checksums); err != nil {
+				t.Errorf("write HTTP fixture: %v", err)
+			}
 		default:
 			http.NotFound(w, r)
 		}
@@ -143,7 +149,9 @@ func TestSelfUpdaterSkipsWhenAlreadyCurrent(t *testing.T) {
 		if r.URL.Path != "/latest" {
 			t.Fatalf("unexpected download request to %s", r.URL.Path)
 		}
-		fmt.Fprint(w, `{"tag_name":"v1.2.4","assets":[]}`)
+		if _, err := fmt.Fprint(w, `{"tag_name":"v1.2.4","assets":[]}`); err != nil {
+			t.Errorf("write HTTP fixture: %v", err)
+		}
 	}))
 	defer server.Close()
 	replaced := false
@@ -186,17 +194,23 @@ func TestSelfUpdaterForceReinstallsCurrentVersion(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/latest":
-			fmt.Fprintf(w, `{
+			if _, err := fmt.Fprintf(w, `{
 				"tag_name": "v1.2.4",
 				"assets": [
 					{"name": "kube-watch_1.2.4_darwin_arm64.tar.gz", "browser_download_url": "%s/archive"},
 					{"name": "checksums.txt", "browser_download_url": "%s/checksums"}
 				]
-			}`, serverURL(r), serverURL(r))
+			}`, serverURL(r), serverURL(r)); err != nil {
+				t.Errorf("write HTTP fixture: %v", err)
+			}
 		case "/archive":
-			w.Write(archiveBytes)
+			if _, err := w.Write(archiveBytes); err != nil {
+				t.Errorf("write HTTP fixture: %v", err)
+			}
 		case "/checksums":
-			fmt.Fprint(w, checksums)
+			if _, err := fmt.Fprint(w, checksums); err != nil {
+				t.Errorf("write HTTP fixture: %v", err)
+			}
 		default:
 			http.NotFound(w, r)
 		}
