@@ -38,7 +38,7 @@ Runbook (dev/test)
 - Releases are created by pushing semantic version tags shaped as `vX.Y.Z`; the tag workflow validates the project and runs GoReleaser. The workflow requires the protected `release` environment and rejects tags that do not point to the exact current `main` commit. The repository must protect `v*` tags and configure approval on that environment. Publish only after the operator explicitly authorizes that exact release action.
 - Run checks before committing runtime changes: prefer `go test -race ./...` where possible, then from `/web` run `npm run typecheck`, `npm run test:unit`, `npm run test:e2e`, and relevant builds.
 - Go coverage is reported in CI with pull-request comments and an 80% statement coverage threshold, and the badge is updated through the dedicated coverage Gist. Treat coverage reductions in changed areas as review findings even while the aggregate threshold is intentionally low. Frontend coverage is a separate task.
-- Go lint findings are currently informational while the existing baseline is cleaned up; do not add new findings in changed code.
+- Go lint findings fail the lint workflow; resolve reported findings before merging.
 
 Testing guidance
 - Add Vitest tests for component logic and Playwright tests for user-visible browser behavior.
