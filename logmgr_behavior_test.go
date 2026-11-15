@@ -171,12 +171,16 @@ func TestFollowContainerLogsResumesAfterLastTimestamp(t *testing.T) {
 			t.Errorf("wrong follow request: %s", r.URL)
 		}
 		if count.Add(1) == 1 {
-			w.Write([]byte("2026-11-15T00:00:01Z first line\n"))
+			if _, err := w.Write([]byte("2026-11-15T00:00:01Z first line\n")); err != nil {
+				t.Errorf("write fixture logs: %v", err)
+			}
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"}, Status: "Failure", Reason: metav1.StatusReasonNotFound, Code: 404, Message: "pod removed"})
+		if err := json.NewEncoder(w).Encode(metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"}, Status: "Failure", Reason: metav1.StatusReasonNotFound, Code: 404, Message: "pod removed"}); err != nil {
+			t.Errorf("write fixture JSON: %v", err)
+		}
 	}))
 	defer server.Close()
 	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
@@ -210,7 +214,9 @@ func TestDeploymentLogSubscriptionClosesWhenTargetMissing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(404)
-		json.NewEncoder(w).Encode(apierrors.NewNotFound(schema.GroupResource{Group: "apps", Resource: "deployments"}, "api").ErrStatus)
+		if err := json.NewEncoder(w).Encode(apierrors.NewNotFound(schema.GroupResource{Group: "apps", Resource: "deployments"}, "api").ErrStatus); err != nil {
+			t.Errorf("write fixture JSON: %v", err)
+		}
 	}))
 	defer server.Close()
 	ch, unsub, err := NewLogManager(testClusterRules(t, server.URL, "team")).Subscribe("dev/cluster", "deployments", "team", "api", 10)

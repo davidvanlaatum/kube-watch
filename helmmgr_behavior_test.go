@@ -49,7 +49,9 @@ func helmFixtureServer(t *testing.T) (*httptest.Server, *atomic.Int32) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/version" {
-			json.NewEncoder(w).Encode(map[string]string{"major": "1", "minor": "37", "gitVersion": "v1.37.2"})
+			if err := json.NewEncoder(w).Encode(map[string]string{"major": "1", "minor": "37", "gitVersion": "v1.37.2"}); err != nil {
+				t.Errorf("write fixture JSON: %v", err)
+			}
 			return
 		}
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/namespaces/team/") {
@@ -71,21 +73,31 @@ func helmFixtureServer(t *testing.T) (*httptest.Server, *atomic.Int32) {
 		}
 		if mode.Load() == 3 || (mode.Load() == 1 && cm) {
 			w.WriteHeader(403)
-			json.NewEncoder(w).Encode(metav1.Status{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"}, Status: "Failure", Reason: metav1.StatusReasonForbidden, Code: 403, Message: "fixture storage forbidden"})
+			if err := json.NewEncoder(w).Encode(metav1.Status{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"}, Status: "Failure", Reason: metav1.StatusReasonForbidden, Code: 403, Message: "fixture storage forbidden"}); err != nil {
+				t.Errorf("write fixture JSON: %v", err)
+			}
 			return
 		}
 		if mode.Load() == 2 {
 			if cm {
-				json.NewEncoder(w).Encode(corev1.ConfigMapList{TypeMeta: configmaps.TypeMeta})
+				if err := json.NewEncoder(w).Encode(corev1.ConfigMapList{TypeMeta: configmaps.TypeMeta}); err != nil {
+					t.Errorf("write fixture JSON: %v", err)
+				}
 			} else {
-				json.NewEncoder(w).Encode(corev1.SecretList{TypeMeta: secrets.TypeMeta})
+				if err := json.NewEncoder(w).Encode(corev1.SecretList{TypeMeta: secrets.TypeMeta}); err != nil {
+					t.Errorf("write fixture JSON: %v", err)
+				}
 			}
 			return
 		}
 		if cm {
-			json.NewEncoder(w).Encode(configmaps)
+			if err := json.NewEncoder(w).Encode(configmaps); err != nil {
+				t.Errorf("write fixture JSON: %v", err)
+			}
 		} else {
-			json.NewEncoder(w).Encode(secrets)
+			if err := json.NewEncoder(w).Encode(secrets); err != nil {
+				t.Errorf("write fixture JSON: %v", err)
+			}
 		}
 	}))
 	t.Cleanup(server.Close)

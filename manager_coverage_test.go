@@ -86,7 +86,9 @@ func TestLogSubscriptionsUseConfiguredContextAndClose(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		json.NewEncoder(w).Encode(corev1.Pod{TypeMeta: metav1.TypeMeta{Kind: "Pod", APIVersion: "v1"}, ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "team"}})
+		if err := json.NewEncoder(w).Encode(corev1.Pod{TypeMeta: metav1.TypeMeta{Kind: "Pod", APIVersion: "v1"}, ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "team"}}); err != nil {
+			t.Errorf("write fixture JSON: %v", err)
+		}
 	}))
 	defer server.Close()
 	manager := NewLogManager(testClusterRules(t, server.URL, "team"))
@@ -143,10 +145,14 @@ func TestHTTPLogRouteStreamsAndUnsubscribes(t *testing.T) {
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/log") {
-			w.Write([]byte("2026-11-15T00:00:00Z hello\n"))
+			if _, err := w.Write([]byte("2026-11-15T00:00:00Z hello\n")); err != nil {
+				t.Errorf("write fixture logs: %v", err)
+			}
 			return
 		}
-		json.NewEncoder(w).Encode(corev1.Pod{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"}, ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "team"}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}})
+		if err := json.NewEncoder(w).Encode(corev1.Pod{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"}, ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "team"}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}}); err != nil {
+			t.Errorf("write fixture JSON: %v", err)
+		}
 	}))
 	defer server.Close()
 	rules := testClusterRules(t, server.URL, "team")
