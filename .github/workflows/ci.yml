@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -37,6 +39,7 @@ jobs:
         working-directory: web
 
       - name: Measure Go coverage and comment on pull request
+        if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
         uses: gwatts/go-coverage-action@v2
         id: coverage
         with:
@@ -45,6 +48,15 @@ jobs:
           cover-pkg: ./...
           test-args: '["-v", "-race"]'
           notes-ref: gocoverage-stable
+
+      # Fork and Dependabot PR tokens cannot push the coverage action's Git notes.
+      - name: Measure Go coverage without repository writes
+        if: github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]')
+        shell: bash
+        run: |
+          go test -v -race -covermode=atomic -coverprofile="$RUNNER_TEMP/go.cov" -coverpkg=./... ./...
+          go tool cover -func="$RUNNER_TEMP/go.cov" | tee "$RUNNER_TEMP/go-coverage.txt"
+          awk '/^total:/ { found = 1; coverage = $3; sub(/%$/, "", coverage); print "Go coverage: " coverage "% (minimum 30%)"; if (coverage + 0 < 30) exit 1 } END { if (!found) exit 1 }' "$RUNNER_TEMP/go-coverage.txt"
 
       - name: Type-check web
         run: npm run typecheck
@@ -55,7 +67,12 @@ jobs:
         working-directory: web
 
       - name: Report frontend coverage on pull request
-        if: always()
+        if: >-
+          !cancelled() && github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.actor != 'dependabot[bot]' &&
+          hashFiles('web/coverage/coverage-summary.json') != '' &&
+          hashFiles('web/coverage/coverage-final.json') != ''
         uses: davelosert/vitest-coverage-report-action@v2
         with:
           working-directory: web
