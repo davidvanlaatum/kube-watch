@@ -378,7 +378,6 @@ func (e *watchEntry) run(stopCh chan struct{}) {
 				slog.Info("reconciling cluster watch", "cluster", e.cluster, "namespace", ns, "resource", e.gvr.Resource)
 			case <-stopCh:
 				resync.Stop()
-				running = false
 				watcher.Stop()
 				watchCancel()
 				slog.Info("cluster watch closed", "cluster", e.cluster, "namespace", e.namespace, "resource", e.gvr.Resource, "reason", "stop requested")

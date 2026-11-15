@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -340,8 +341,9 @@ func readContainerLogs(ctx context.Context, client kubernetes.Interface, namespa
 	if err != nil {
 		return nil, err
 	}
-	defer stream.Close()
-	return scanLogLines(stream, podName, container)
+	lines, readErr := scanLogLines(stream, podName, container)
+	closeErr := stream.Close()
+	return lines, errors.Join(readErr, closeErr)
 }
 
 func followContainerLogs(ctx context.Context, client kubernetes.Interface, namespace, podName, container string, since time.Time, out chan<- []byte) {

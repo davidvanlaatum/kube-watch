@@ -13,6 +13,8 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    env:
+      GO_COVERAGE_MINIMUM: "80"
     permissions:
       contents: write
       pull-requests: write
@@ -43,7 +45,7 @@ jobs:
         uses: gwatts/go-coverage-action@v2
         id: coverage
         with:
-          coverage-threshold: 30
+          coverage-threshold: ${{ env.GO_COVERAGE_MINIMUM }}
           cover-mode: atomic
           cover-pkg: ./...
           test-args: '["-v", "-race"]'
@@ -56,7 +58,7 @@ jobs:
         run: |
           go test -v -race -covermode=atomic -coverprofile="$RUNNER_TEMP/go.cov" -coverpkg=./... ./...
           go tool cover -func="$RUNNER_TEMP/go.cov" | tee "$RUNNER_TEMP/go-coverage.txt"
-          awk '/^total:/ { found = 1; coverage = $3; sub(/%$/, "", coverage); print "Go coverage: " coverage "% (minimum 30%)"; if (coverage + 0 < 30) exit 1 } END { if (!found) exit 1 }' "$RUNNER_TEMP/go-coverage.txt"
+          awk -v minimum="$GO_COVERAGE_MINIMUM" '/^total:/ { found = 1; coverage = $3; sub(/%$/, "", coverage); print "Go coverage: " coverage "% (minimum " minimum "%)"; if (coverage + 0 < minimum) exit 1 } END { if (!found) exit 1 }' "$RUNNER_TEMP/go-coverage.txt"
 
       - name: Type-check web
         run: npm run typecheck
