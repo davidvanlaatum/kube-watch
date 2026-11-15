@@ -75,6 +75,7 @@ CI:
 - GitHub Actions runs on pushes to `main` and pull requests.
 - CI runs Go tests with the race detector, web type-checking, Vitest unit tests, Playwright Chromium tests, the Vite production build, and the final Go binary build with embedded web assets.
 - CI measures Go statement coverage, posts coverage details to pull requests, and updates the current Go coverage badge from `main`. The initial Go coverage threshold is 30% while coverage is expanded; frontend coverage is tracked separately.
+- Fork and Dependabot pull requests run the same race-enabled Go tests and 30% coverage gate without publishing Git notes or PR coverage comments. Frontend coverage comments require a generated report and a same-repository PR with a writable token.
 - CI posts a frontend Vitest coverage summary to pull requests and updates the frontend coverage badge from `main` using the same coverage Gist.
 - The coverage badge workflow requires the `COVERAGE_GIST_SECRET` GitHub Actions secret with permission to update the dedicated [coverage Gist](https://gist.github.com/davidvanlaatum/b4f56efa2428740a17cdf241c5c700c1).
 
