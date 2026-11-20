@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +32,7 @@ type usage struct {
 	Memory float64 `json:"memory"` // bytes
 }
 type metricPoint struct {
+	sampleID     [32]byte
 	Time         int64             `json:"time"`
 	Usage        *usage            `json:"usage"`
 	Aggregations map[string]*usage `json:"aggregations,omitempty"`
@@ -40,6 +44,7 @@ type containerUsage struct {
 	Limits   usage  `json:"limits"`
 }
 type workloadMetrics struct {
+	sampleID     [32]byte
 	UID          string            `json:"uid"`
 	Name         string            `json:"name"`
 	Usage        *usage            `json:"usage"`
@@ -180,12 +185,19 @@ func (e *metricsEntry) record(w *workloadMetrics, now time.Time) {
 	if w.Usage != nil && w.Reporting == w.Expected {
 		sampleTime = w.Updated
 	}
-	// Do not turn repeated Metrics API readings into new observations.
-	if len(points) > 0 && sampleTime <= points[len(points)-1].Time {
+	// Deployment readings span pods with independent source timestamps. Deduplicate
+	// the full set, rather than dropping updates when only the oldest timestamp is unchanged.
+	if w.sampleID != ([32]byte{}) {
+		sampleTime = now.UnixMilli()
+		if len(points) > 0 && w.sampleID == points[len(points)-1].sampleID {
+			w.History = points
+			return
+		}
+	} else if len(points) > 0 && sampleTime <= points[len(points)-1].Time {
 		w.History = points
 		return
 	}
-	point := metricPoint{Time: sampleTime}
+	point := metricPoint{Time: sampleTime, sampleID: w.sampleID}
 	if w.Reporting == w.Expected {
 		point.Usage = w.Usage
 		point.Aggregations = w.Aggregations
@@ -318,6 +330,7 @@ func (e *metricsEntry) refreshDeployments(ctx context.Context, now time.Time) {
 	for _, deployment := range deployments.Items {
 		w := &workloadMetrics{UID: string(deployment.GetUID()), Name: deployment.GetName()}
 		var readings []usage
+		var sampleKeys []string
 		for _, pod := range e.podObjects {
 			if owners[controllerUID(pod, "ReplicaSet")] != w.UID {
 				continue
@@ -327,6 +340,7 @@ func (e *metricsEntry) refreshDeployments(ctx context.Context, now time.Time) {
 				continue
 			}
 			w.Pods = append(w.Pods, p.UID)
+			sampleKeys = append(sampleKeys, fmt.Sprintf("%s:%d:%d/%d", p.UID, p.Updated, p.Reporting, p.Expected))
 			addUsage(&w.Requests, p.Requests)
 			addUsage(&w.Limits, p.Limits)
 			w.Expected++
@@ -338,6 +352,8 @@ func (e *metricsEntry) refreshDeployments(ctx context.Context, now time.Time) {
 				}
 			}
 		}
+		sort.Strings(sampleKeys)
+		w.sampleID = sha256.Sum256([]byte(strings.Join(sampleKeys, "|")))
 		w.Aggregations = aggregatePodUsage(readings)
 		w.Usage = w.Aggregations["sum"]
 		e.record(w, now)

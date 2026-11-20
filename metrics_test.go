@@ -451,3 +451,51 @@ func TestDeploymentUsageAggregations(t *testing.T) {
 		t.Fatal("incomplete aggregates should remain chart gaps")
 	}
 }
+
+func TestDeploymentHistoryTracksAsynchronousPodSamples(t *testing.T) {
+	m, client := metricsFixture(t)
+	ctx := context.Background()
+	rs, err := client.Resource(supportedResources["replicasets"]).Namespace("test").Get(ctx, "unrelated-rs", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metricOwner(rs, "Deployment", "deployment")
+	if _, err = client.Resource(supportedResources["replicasets"]).Namespace("test").Update(ctx, rs, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := m.snapshot(ctx, "ctx", "deployments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, cpu := range map[string]string{"new": "200m", "unrelated": "50m"} {
+		metric, getErr := client.Resource(podMetricsGVR).Namespace("test").Get(ctx, name, metav1.GetOptions{})
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		metric.Object["timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
+		metric.Object["containers"] = []interface{}{map[string]interface{}{"name": "app", "usage": map[string]interface{}{"cpu": cpu, "memory": "128Mi"}}}
+		if _, err = client.Resource(podMetricsGVR).Namespace("test").Update(ctx, metric, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.entries["ctx"].polled = time.Now().Add(-metricsInterval)
+	second, err := m.snapshot(ctx, "ctx", "deployments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, after := first.Items["deployment"], second.Items["deployment"]
+	if before.Updated != after.Updated || before.Usage.CPU != after.Usage.CPU {
+		t.Fatal("fixture should retain oldest timestamp and total CPU")
+	}
+	if len(after.History) != 2 || after.History[1].Aggregations["min"].CPU != 50 || after.History[1].Aggregations["max"].CPU != 200 {
+		t.Fatalf("changed extrema lost from history: %+v", after.History)
+	}
+	m.entries["ctx"].polled = time.Now().Add(-metricsInterval)
+	repeated, err := m.snapshot(ctx, "ctx", "deployments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repeated.Items["deployment"].History) != 2 {
+		t.Fatal("identical pod sample sets created duplicate history")
+	}
+}
