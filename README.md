@@ -142,7 +142,7 @@ Next planned improvements include CLI flags for log level, snapshot persistence,
 
 ### CPU and memory trends
 
-Pods and Deployments show sortable CPU (millicores) and memory (MiB/GiB) columns with 15-minute sparklines. Select a row and open **Metrics** for larger charts, sampled values on hover, configured request/limit reference lines, and container or pod breakdowns. The panel can be maximized like the other detail tabs.
+Pods and Deployments show sortable CPU (millicores) and memory (MiB/GiB) columns with 15-minute sparklines. Select a row and open **Metrics** for larger charts, sampled values on hover, configured request/limit reference lines with labelled colour swatches, and container or pod breakdowns. Equal request and limit values share one dashed line so their patterns do not overlap. The panel can be maximized like the other detail tabs.
 
 Metrics use the Kubernetes Metrics API, the source behind `kubectl top`. The active kubeconfig user needs `list` on `pods.metrics.k8s.io` and core `pods` in the context's namespace. Deployment metrics additionally need `list` on `replicasets.apps` and `deployments.apps`. kube-watch does not install Metrics Server or change RBAC. Missing API access is shown as a warning while the resource list remains usable.
 

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Box, Typography } from '@mui/material'
+import { Box, Typography, useTheme } from '@mui/material'
 import { formatUsage, historyDuration, type MetricPoint, type Usage } from '../metrics'
 
 export function chartSegments(points: MetricPoint[], metric: keyof Usage, start: number, end: number) {
@@ -21,6 +21,13 @@ export function chartSegments(points: MetricPoint[], metric: keyof Usage, start:
 export function UsageChart({ points, metric, now, compact = false, request = 0, limit = 0 }: {
   points: MetricPoint[]; metric: keyof Usage; now: number; compact?: boolean; request?: number; limit?: number
 }) {
+  const theme = useTheme()
+  const references = request > 0 && request === limit
+    ? [{ value: request, label: 'Requests and limits', color: theme.palette.text.secondary, dash: '6 4' }]
+    : [
+        { value: request, label: 'Requests', color: theme.palette.warning.main, dash: '6 4' },
+        { value: limit, label: 'Limits', color: theme.palette.secondary.main, dash: '2 4' },
+      ].filter(ref => ref.value > 0)
   const [hover, setHover] = useState<number | null>(null)
   const start = now - historyDuration
   const segments = chartSegments(points, metric, start, now)
@@ -50,9 +57,9 @@ export function UsageChart({ points, metric, now, compact = false, request = 0, 
           </g>)}
           <text x={left} y={height - 6} fill="currentColor" fontSize="11">{new Date(start).toLocaleTimeString()}</text>
           <text x={right} y={height - 6} textAnchor="end" fill="currentColor" fontSize="11">{new Date(now).toLocaleTimeString()}</text>
-          {[{ value: request, label: 'Configured requests' }, { value: limit, label: 'Configured limits' }].filter(ref => ref.value > 0).map(ref =>
-            <line key={ref.label} x1={left} x2={right} y1={y(ref.value)} y2={y(ref.value)} stroke="currentColor" strokeDasharray={ref.label.includes('requests') ? '4 4' : '8 3'} opacity="0.6">
-              <title>{ref.label}: {formatUsage(ref.value, metric)}</title>
+          {references.map(ref =>
+            <line key={ref.label} x1={left} x2={right} y1={y(ref.value)} y2={y(ref.value)} stroke={ref.color} strokeWidth="1.5" strokeDasharray={ref.dash} vectorEffect="non-scaling-stroke">
+              <title>Configured {ref.label.toLowerCase()}: {formatUsage(ref.value, metric)}</title>
             </line>)}
         </>}
         {segments.map((segment, index) => <g key={index}>
@@ -62,8 +69,14 @@ export function UsageChart({ points, metric, now, compact = false, request = 0, 
         {nearest && <circle cx={x(nearest.time)} cy={y(nearest.value)} r="4" fill="currentColor" />}
       </svg>
       {!compact && <Typography variant="caption" color="text.secondary" component="div" sx={{ minHeight: 20 }}>
-        {nearest ? `${new Date(nearest.time).toLocaleTimeString()}: ${formatUsage(nearest.value, metric)}` : 'Hover for sample values. Dashed lines: configured requests (short), limits (long).'}
+        {nearest ? `${new Date(nearest.time).toLocaleTimeString()}: ${formatUsage(nearest.value, metric)}` : 'Hover for sample values.'}
       </Typography>}
+      {!compact && <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, color: 'text.secondary' }}>
+        {references.map(ref => <Typography key={ref.label} variant="caption" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
+          <svg width="30" height="10" aria-hidden="true"><line x1="0" x2="30" y1="5" y2="5" stroke={ref.color} strokeWidth="1.5" strokeDasharray={ref.dash} /></svg>
+          {ref.label}: {formatUsage(ref.value, metric)}
+        </Typography>)}
+      </Box>}
     </Box>
   )
 }

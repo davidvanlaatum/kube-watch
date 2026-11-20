@@ -151,7 +151,10 @@ test.beforeEach(async ({ page }) => {
     })
   })
 
-  await page.route('**/api/metrics/**', route => route.fulfill({ json: { time: Date.now(), items: {}, pods: {} } }))
+  await page.route('**/api/metrics/**', route => {
+    const usage = workloadMetrics('pod-1', pod.metadata.name)
+    return route.fulfill({ json: { time: metricsNow, items: { 'pod-1': usage }, pods: { 'pod-1': usage } } })
+  })
 
   await page.route('**/api/contexts', async route => {
     await route.fulfill({
@@ -433,6 +436,8 @@ function workloadMetrics(uid: string, name: string, cpu = 125) {
 
 test('shows pod CPU/memory trends and a scrollable, maximizable Metrics tab', async ({ page }, testInfo) => {
   const usage = workloadMetrics('pod-1', pod.metadata.name)
+  usage.requests.cpu = usage.limits.cpu
+  usage.containers[0].requests.cpu = usage.limits.cpu
   await page.route('**/api/metrics/dev/pods', route => route.fulfill({ json: { time: metricsNow, items: { 'pod-1': usage }, pods: { 'pod-1': usage } } }))
   await page.goto('/view/dev/pods')
   const row = page.getByRole('row', { name: /api-7d9f/ })
@@ -444,6 +449,7 @@ test('shows pod CPU/memory trends and a scrollable, maximizable Metrics tab', as
   await expect(page.getByRole('table', { name: 'Container metrics' })).toContainText('api')
   await expect(page.getByText(/1 of 1 containers reporting/)).toBeVisible()
   await expect(page.locator('.details-panel').getByRole('img')).toHaveCount(2)
+  await expect(page.getByText('Requests and limits: 500m', { exact: true })).toBeVisible()
   const panel = page.locator('.details-panel-metrics')
   await expect.poll(async () => panel.evaluate(el => el.scrollHeight <= el.clientHeight)).toBe(true)
   await page.getByRole('button', { name: 'Maximize details' }).click()
