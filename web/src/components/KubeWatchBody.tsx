@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Box, CircularProgress } from '@mui/material'
+import { useMetrics } from '../hooks/useMetrics'
+import { supportsMetrics } from '../metrics'
+import { metricColumns, MetricsDetails } from './MetricsDetails'
 import { BackendLogToasts } from './BackendLogToasts'
 import { DetailsDrawer } from './DetailsDrawer'
 import { ResourceFilters } from './ResourceFilters'
@@ -68,13 +71,14 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
   })
 
   const definition = resourceDefinition(resource) || resourceRegistry.pods
-  const columns = definition.columns
+  const metrics = useMetrics(ctx, resource)
+  const columns = supportsMetrics(resource) ? [...definition.columns, ...metricColumns(metrics.snapshot)] : definition.columns
   const allItems = [...items.values()]
   const labelFilterSuggestions = useMemo(() => labelSuggestions(allItems), [allItems])
   const showStatusFilter = definition.supports.statusFilter
   const statusFilterSuggestions = useMemo(() => statusSuggestions(resource, allItems), [resource, allItems])
   const filteredItems = allItems.filter(item => matchesFilters(resource, item, filters))
-  const sortedItems = sortItems(resource, filteredItems, sort)
+  const sortedItems = sortItems(resource, filteredItems, sort, columns)
   const selectedItem = selectedKey ? items.get(selectedKey) : null
   const {
     history: helmHistory,
@@ -136,6 +140,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
       )}
       <BackendLogToasts logs={backendLogs} onDismiss={dismissBackendLog} />
       {loadError && !isLoading && <Alert severity="error" sx={{ mb: 2 }}>{loadError}</Alert>}
+      {supportsMetrics(resource) && metrics.error && <Alert severity="warning" sx={{ mb: 2 }}>{metrics.error}</Alert>}
       <ResourceFilters
         resource={resource}
         filters={filters}
@@ -180,6 +185,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
           supportsEvents,
           supportsLogs,
           supportsHistory,
+          supportsMetrics: supportsMetrics(resource),
         }}
         events={{
           columns: resourceRegistry.events.columns,
@@ -207,6 +213,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
           error: logsError,
           entries: sortedLogEntries,
         }}
+        metrics={<MetricsDetails workload={metrics.snapshot?.items?.[selectedItem?.metadata?.uid]} snapshot={metrics.snapshot} deployment={resource === 'deployments'} error={metrics.error} />}
         formatters={{
           formatLogTimestamp,
           logEntryKey,

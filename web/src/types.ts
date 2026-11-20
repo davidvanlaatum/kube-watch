@@ -36,7 +36,7 @@ export type LogEnvelope = {
 
 export type LogEntry = { pod: string; container: string; timestamp: string; line: string; seq: number }
 
-export type DetailsTab = 'yaml' | 'events' | 'logs' | 'history'
+export type DetailsTab = 'yaml' | 'events' | 'logs' | 'history' | 'metrics'
 
 export type TableFilters = {
   name: string

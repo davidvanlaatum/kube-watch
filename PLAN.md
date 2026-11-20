@@ -26,6 +26,7 @@ Architecture
   - WatchManager: maintains watchEntry per (context,GVR,namespace). Each entry: dynamic client, result watch loop, lastResourceVersion, in-memory cache of latest ADDED/MODIFIED events, broadcast to subscribers.
   - HTTP(S) server: endpoints
     - /api/contexts => [{name, namespace}, ...]
+    - /api/metrics/{context}/{pods|deployments} => shared sampled CPU/memory usage and bounded in-memory history
     - /api/version => build metadata plus latest GitHub release update status
     - /sse/{context}/{resource} => SSE event stream (SNAPSHOT/ADDED/MODIFIED/DELETED/SYNCED + info/error messages)
     - /logs/{context}/{resource}/{namespace}/{name}?tailLines=200 => SSE event stream for pod/deployment logs
@@ -40,6 +41,7 @@ Key design decisions
 
 - Dynamic client + unstructured: supports many resources without generating typed clients.
 - Namespaced default: respecting RBAC is a priority; the backend reads context default namespace and watches that namespace. If cluster-list is permitted, cluster-scoped list/watch can be used (previous behavior) but the default avoids Forbidden errors.
+- Resource usage: on-demand Metrics API polling with 15-minute in-memory history, SVG sparklines, and a Metrics detail tab for Pods/Deployments; deployment aggregation follows controller ownership through ReplicaSets.
 - Shared watches: one watch per (context,resource,namespace) reduces duplicate API calls when multiple UI clients connect.
 - In-memory snapshot cache: new Kubernetes resource subscribers receive a complete replacement snapshot so reconnects remove stale objects even if the watch started earlier.
 - Kubeconfig loading: client-go default loading rules are used so `$KUBECONFIG` multi-file configs and fallback to `~/.kube/config` behave like kubectl.

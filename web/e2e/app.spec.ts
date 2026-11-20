@@ -151,6 +151,8 @@ test.beforeEach(async ({ page }) => {
     })
   })
 
+  await page.route('**/api/metrics/**', route => route.fulfill({ json: { time: Date.now(), items: {}, pods: {} } }))
+
   await page.route('**/api/contexts', async route => {
     await route.fulfill({
       contentType: 'application/json',
@@ -417,4 +419,66 @@ test('replacement snapshots remove rows after a missed deletion', async ({ page 
   await expect(page.getByRole('table')).toBeVisible()
   await expect(page.getByRole('status')).toHaveCount(0)
   await expect(page.getByRole('row', { name: /api-7d9f/ })).toHaveCount(0)
+})
+
+const metricsNow = new Date('2026-07-08T00:00:00Z').getTime()
+function workloadMetrics(uid: string, name: string, cpu = 125) {
+  return {
+    uid, name, usage: { cpu, memory: 128 * 1024 ** 2 }, requests: { cpu: 100, memory: 64 * 1024 ** 2 }, limits: { cpu: 500, memory: 256 * 1024 ** 2 },
+    reporting: 1, expected: 1, updated: metricsNow,
+    history: Array.from({ length: 61 }, (_, i) => ({ time: metricsNow - (60 - i) * 15_000, usage: i === 30 ? null : { cpu: cpu * (1 + Math.sin((i - 60) / 6) * 0.2), memory: 128 * 1024 ** 2 * (1 + Math.sin((i - 60) / 10) * 0.15) } })),
+    containers: [{ name: 'api', usage: { cpu, memory: 128 * 1024 ** 2 }, requests: { cpu: 100, memory: 64 * 1024 ** 2 }, limits: { cpu: 500, memory: 256 * 1024 ** 2 } }],
+  }
+}
+
+test('shows pod CPU/memory trends and a scrollable, maximizable Metrics tab', async ({ page }, testInfo) => {
+  const usage = workloadMetrics('pod-1', pod.metadata.name)
+  await page.route('**/api/metrics/dev/pods', route => route.fulfill({ json: { time: metricsNow, items: { 'pod-1': usage }, pods: { 'pod-1': usage } } }))
+  await page.goto('/view/dev/pods')
+  const row = page.getByRole('row', { name: /api-7d9f/ })
+  await expect(row).toContainText('125m')
+  await expect(row).toContainText('128 MiB')
+  await expect(row.getByRole('img')).toHaveCount(2)
+  await row.click()
+  await page.getByRole('tab', { name: 'Metrics' }).click()
+  await expect(page.getByRole('table', { name: 'Container metrics' })).toContainText('api')
+  await expect(page.getByText(/1 of 1 containers reporting/)).toBeVisible()
+  await expect(page.locator('.details-panel').getByRole('img')).toHaveCount(2)
+  const panel = page.locator('.details-panel-metrics')
+  await expect.poll(async () => panel.evaluate(el => el.scrollHeight <= el.clientHeight)).toBe(true)
+  await page.getByRole('button', { name: 'Maximize details' }).click()
+  await expect(page.locator('.details-panel-maximized')).toBeVisible()
+  await expect(page.getByRole('table', { name: 'Container metrics' })).toBeVisible()
+  await expect.poll(async () => (await page.locator('.details-panel-maximized').boundingBox())?.height || 0).toBeGreaterThan((page.viewportSize()?.height || 0) * 0.9)
+  await expect.poll(async () => (await page.locator('.details-panel-maximized').boundingBox())?.y || 0).toBeLessThan(20)
+  await page.mouse.move(0, 0)
+  await page.getByRole('tooltip').waitFor({ state: 'hidden' })
+  await captureReadmeScreenshot(page, 'metrics.png', screenshotTheme(testInfo))
+  await page.getByRole('button', { name: 'Restore details size' }).click()
+  await expect(page.getByRole('tab', { name: 'Metrics' })).toHaveAttribute('aria-selected', 'true')
+})
+
+test('shows deployment totals, per-pod averages, breakdown and incomplete coverage', async ({ page }) => {
+  const usage = workloadMetrics('deployment-1', 'web', 250)
+  const deployment = { kind: 'Deployment', metadata: { uid: 'deployment-1', name: 'web', namespace: 'default' }, spec: { replicas: 2 }, status: { readyReplicas: 2 } }
+  await page.route('**/sse/dev/deployments', route => route.fulfill({ contentType: 'text/event-stream', body: `data: ${JSON.stringify({ type: 'SNAPSHOT', objects: [deployment] })}\n\n` }))
+  await page.route('**/api/metrics/dev/deployments', route => route.fulfill({ json: { time: metricsNow, items: { 'deployment-1': { ...usage, reporting: 1, expected: 2, pods: ['pod-1'] } }, pods: { 'pod-1': workloadMetrics('pod-1', 'web-old') } } }))
+  await page.goto('/view/dev/deployments')
+  const row = page.getByRole('row', { name: /web/ })
+  await expect(row).toContainText('250m *')
+  await row.click()
+  await page.getByRole('tab', { name: 'Metrics' }).click()
+  await expect(page.getByText(/1 of 2 pods reporting/)).toBeVisible()
+  await expect(page.getByText(/Average per reporting pod: CPU 250m/)).toBeVisible()
+  await expect(page.getByText(/Usage is incomplete/)).toBeVisible()
+  await expect(page.getByRole('table', { name: 'Pod metrics' })).toContainText('web-old')
+})
+
+test('keeps resource browsing available when the Metrics API is missing', async ({ page }) => {
+  await page.route('**/api/metrics/dev/pods', route => route.fulfill({ json: { time: metricsNow, items: {}, pods: {}, error: 'Metrics API unavailable' } }))
+  await page.goto('/view/dev/pods')
+  await expect(page.getByText('Metrics API unavailable')).toBeVisible()
+  await page.getByRole('row', { name: /api-7d9f/ }).click()
+  await page.getByRole('tab', { name: 'YAML' }).click()
+  await expect(page.locator('.yaml-editor')).toBeVisible()
 })

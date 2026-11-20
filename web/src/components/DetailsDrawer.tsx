@@ -24,7 +24,7 @@ import {
   Typography,
 } from '@mui/material'
 import { useEffect, useLayoutEffect, useRef } from 'react'
-import type { RefObject } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { JsonLogMessage } from './JsonLogMessage'
 import { RelativeAge } from './RelativeAge'
 import { YamlEditor } from './YamlEditor'
@@ -52,6 +52,7 @@ type DetailsTabs = {
   supportsEvents: boolean
   supportsLogs: boolean
   supportsHistory: boolean
+  supportsMetrics?: boolean
 }
 
 type DetailsView = {
@@ -100,6 +101,7 @@ type DetailsDrawerProps = {
   events: EventsDetails
   history: HistoryDetails
   logs: LogsDetails
+  metrics?: ReactNode
   formatters: DetailsFormatters
 }
 
@@ -111,6 +113,7 @@ export function DetailsDrawer({
   history,
   logs,
   formatters,
+  metrics,
 }: DetailsDrawerProps) {
   const { item, key, resource, detailsItem, panelRef, onClose } = selection
   const detailsTitle = `${item?.kind || resource}/${item?.metadata?.name || key}`
@@ -146,7 +149,7 @@ export function DetailsDrawer({
             bottom: 12,
             left: 12,
             width: 'auto',
-            height: view.isMaximized ? 'calc(100vh - 24px)' : tabs.active === 'yaml' ? '42vh' : 'auto',
+            height: view.isMaximized ? 'calc(100vh - 24px)' : (tabs.active === 'yaml' || tabs.active === 'metrics') ? '42vh' : 'auto',
             maxHeight: view.isMaximized ? 'calc(100vh - 24px)' : '42vh',
             borderRadius: 2,
             overflow: 'hidden',
@@ -190,8 +193,10 @@ export function DetailsDrawer({
             <Tab value="yaml" label="YAML" />
             {tabs.supportsEvents && <Tab value="events" label="Events" />}
             {tabs.supportsLogs && <Tab value="logs" label="Logs" />}
+            {tabs.supportsMetrics && <Tab value="metrics" label="Metrics" />}
             {tabs.supportsHistory && <Tab value="history" label="History" />}
           </Tabs>
+          {tabs.active === 'metrics' && tabs.supportsMetrics && metrics}
           {tabs.active === 'yaml' && <YamlEditor key={`${resource}:${key}`} value={detailsItem} />}
           {tabs.active === 'history' && tabs.supportsHistory && (
             <HistoryTab details={history} />

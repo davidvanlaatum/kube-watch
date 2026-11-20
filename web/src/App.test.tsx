@@ -148,6 +148,7 @@ describe('App', () => {
           }),
         })
       }
+      if (url.startsWith('/api/metrics/')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ time: Date.now(), items: {}, pods: {} }) })
       if (url === '/api/helm-history/dev/secrets/api') {
         return Promise.resolve({
           ok: true,

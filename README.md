@@ -139,3 +139,17 @@ Agent / operator instructions
 - `npm run test:unit:coverage` runs the Vitest suite with V8 coverage, prints a text summary, writes an HTML report to `web/coverage/`, and enforces provisional minimums of 50% statements/lines, 40% functions, and 35% branches. Playwright coverage remains a separate browser-test concern.
 
 Next planned improvements include CLI flags for log level, snapshot persistence, and multi-namespace selection.
+
+### CPU and memory trends
+
+Pods and Deployments show sortable CPU (millicores) and memory (MiB/GiB) columns with 15-minute sparklines. Select a row and open **Metrics** for larger charts, sampled values on hover, configured request/limit reference lines, and container or pod breakdowns. The panel can be maximized like the other detail tabs.
+
+Metrics use the Kubernetes Metrics API, the source behind `kubectl top`. The active kubeconfig user needs `list` on `pods.metrics.k8s.io` and core `pods` in the context's namespace. Deployment metrics additionally need `list` on `replicasets.apps` and `deployments.apps`. kube-watch does not install Metrics Server or change RBAC. Missing API access is shown as a warning while the resource list remains usable.
+
+The browser polls `/api/metrics/{context}/{pods|deployments}` every 15 seconds while a supported view is open. The backend shares pod readings across clients and views, refreshing at most once every 15 seconds per context. Deployment ownership follows Deployment → ReplicaSet → Pod, including both ReplicaSets during rolling updates. Deployment totals and averages include fully reporting pods, with reporting coverage shown explicitly; pod totals can be partial when a container is missing. Missing readings display `—`, partial totals carry `*`, and samples older than one minute are excluded. CPU is a measurement-window average and memory is working-set usage. Configured requests/limits are summed; missing limits do not mean zero or that the workload is bounded by the displayed sum.
+
+History is collected on demand, held only in backend memory, capped at 61 samples per workload and the last 15 minutes, and reset on restart or idle context eviction. Closing the view stops polling; revisiting an active backend can reuse retained samples. Charts show gaps for missing or incomplete samples and collection interruptions. Pod UID changes start new histories, and repeated source timestamps do not create extra samples. Historical data from before collection is unavailable. No charting library, metrics client dependency, database, or Prometheus setup is required.
+
+![CPU and memory metrics tab](docs/screenshots/metrics.png)
+
+[Dark theme metrics screenshot](docs/screenshots/metrics-dark.png)

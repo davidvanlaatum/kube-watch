@@ -1,10 +1,10 @@
 import { eventTimestamp } from './resourceColumns'
 import { resourceDefinition } from './resourceRegistry'
-import type { SortDirection, SortState } from './types'
+import type { Column, SortDirection, SortState } from './types'
 
-export function sortItems(resource: string, values: any[], sort: SortState) {
+export function sortItems(resource: string, values: any[], sort: SortState, columns: Column[] | undefined = resourceDefinition(resource)?.columns) {
   if (sort) {
-    const sortValue = resourceDefinition(resource)?.columns.find(column => column.id === sort.columnId)?.sortValue ?? nameSortValue
+    const sortValue = columns?.find(column => column.id === sort.columnId)?.sortValue ?? nameSortValue
     return values.sort((a, b) => compareSortValues(sortValue(a), sortValue(b), sort.direction))
   }
   if (resource === 'events') return values.sort((a, b) => eventTimestamp(b) - eventTimestamp(a))
