@@ -2,12 +2,17 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -170,5 +175,49 @@ func TestLogManagerStreamPodObjectReportsNoContainers(t *testing.T) {
 func TestWatchErrorStatusRejectsUnrecognizedObject(t *testing.T) {
 	if _, ok := watchErrorStatus("not a status"); ok {
 		t.Fatal("expected unrecognized object to return ok=false")
+	}
+}
+
+func TestFollowContainerLogsReportsRecoveryBeforeAnyLogLines(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			http.Error(w, "container is waiting to start: PodInitializing", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out := make(chan []byte, 8)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		followContainerLogs(ctx, client, "default", "api-1", "app", time.Now(), out)
+	}()
+	for _, wantType := range []string{"ERROR", "INFO"} {
+		select {
+		case data := <-out:
+			event := decodeLogEnvelope(t, data)
+			if event.Type != wantType || event.Pod != "api-1" || event.Container != "app" {
+				t.Fatalf("event = %#v; want scoped %s", event, wantType)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for %s", wantType)
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("followContainerLogs did not stop")
 	}
 }

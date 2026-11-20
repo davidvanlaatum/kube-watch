@@ -25,7 +25,7 @@ export function useResourceLogs({
 }: ResourceLogsOptions) {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<LogEnvelope | null>(null)
   const [activeContainer, setActiveContainer] = useState<string>('')
   const [autoScroll, setAutoScroll] = useState(true)
   const detailsRef = useRef<HTMLDivElement | null>(null)
@@ -85,7 +85,7 @@ export function useResourceLogs({
         const env: LogEnvelope = JSON.parse(ev.data)
         if (env.type === 'LOG' && env.pod && env.container && env.line !== undefined) {
           setLoading(false)
-          setError(prev => prev === LOG_RECONNECT_ERROR ? null : prev)
+          setError(prev => clearRecoveredError(prev, env))
           const entry: LogEntry = {
             pod: env.pod,
             container: env.container,
@@ -101,12 +101,12 @@ export function useResourceLogs({
           return
         }
         if (env.type === 'INFO') {
-          setError(prev => prev === LOG_RECONNECT_ERROR ? null : prev)
+          setError(prev => clearRecoveredError(prev, env))
           return
         }
         if (env.type === 'ERROR' || env.error) {
           setLoading(false)
-          setError(env.error || 'Log stream error')
+          setError({ ...env, error: env.error || 'Log stream error' })
         }
       } catch (parseError) {
         console.warn('log stream parse', parseError)
@@ -114,7 +114,7 @@ export function useResourceLogs({
     }
     es.onerror = (streamError) => {
       setLoading(false)
-      setError(prev => prev && prev !== LOG_RECONNECT_ERROR ? prev : LOG_RECONNECT_ERROR)
+      setError(prev => prev || { error: LOG_RECONNECT_ERROR })
       console.warn('log stream error', streamError)
     }
     esRef.current = es
@@ -137,7 +137,7 @@ export function useResourceLogs({
     autoScroll,
     setAutoScroll,
     loading,
-    error,
+    error: error?.error || null,
     sortedEntries,
     entryCount: entries.length,
   }
@@ -154,4 +154,13 @@ export function useResourceLogs({
   function selectedContainerNames(containers: any[] | undefined) {
     return (containers || []).map(container => container?.name || '').join('\u0000')
   }
+}
+
+// Scoped INFO events confirm that this container's follow request succeeded.
+function clearRecoveredError(error: LogEnvelope | null, event: LogEnvelope) {
+  if (error?.error === LOG_RECONNECT_ERROR) return null
+  if (error?.pod && error.container && error.pod === event.pod && error.container === event.container) {
+    return null
+  }
+  return error
 }
