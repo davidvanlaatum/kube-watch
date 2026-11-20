@@ -126,6 +126,12 @@ func (m *MetricsManager) snapshot(ctx context.Context, cluster, kind string) (me
 	}
 	if now.Sub(e.polled) >= metricsInterval {
 		e.refreshPods(ctx, now)
+		if err := ctx.Err(); err != nil {
+			// A cancelled browser request must not poison the shared cache.
+			e.polled = time.Time{}
+			e.deploymentPolled = time.Time{}
+			return metricsSnapshot{}, err
+		}
 		e.polled = now
 		for key, points := range e.histories {
 			for len(points) > 0 && points[0].Time < now.Add(-metricsRetention).UnixMilli() {
@@ -142,6 +148,10 @@ func (m *MetricsManager) snapshot(ctx context.Context, cluster, kind string) (me
 	if kind == "deployments" {
 		if e.deploymentPolled.Before(e.polled) {
 			e.refreshDeployments(ctx, now)
+			if err := ctx.Err(); err != nil {
+				e.deploymentPolled = time.Time{}
+				return metricsSnapshot{}, err
+			}
 			e.deploymentPolled = e.polled
 		}
 		items = e.deployments
@@ -182,19 +192,25 @@ func (e *metricsEntry) record(w *workloadMetrics, now time.Time) {
 func (e *metricsEntry) refreshPods(ctx context.Context, now time.Time) {
 	e.err = ""
 	pods, err := e.client.Resource(supportedResources["pods"]).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
+	if ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		e.err = fmt.Sprintf("Cannot read pods for metrics: %v", err)
 		e.pods = nil
 		e.podObjects = nil
 		return
 	}
-	e.podObjects = pods.Items
 	metrics, err := e.client.Resource(podMetricsGVR).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
 	if apierrors.IsNotFound(err) {
 		stable := podMetricsGVR
 		stable.Version = "v1"
 		metrics, err = e.client.Resource(stable).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
 	}
+	if ctx.Err() != nil {
+		return
+	}
+	e.podObjects = pods.Items
 	byName := make(map[string]unstructured.Unstructured)
 	if err != nil {
 		e.err = fmt.Sprintf("CPU/memory metrics unavailable (Metrics API and pods.metrics.k8s.io list permission are required): %v", err)
@@ -269,11 +285,17 @@ func (e *metricsEntry) refreshDeployments(ctx context.Context, now time.Time) {
 	e.deploymentErr = ""
 	e.deployments = nil
 	replicas, err := e.client.Resource(supportedResources["replicasets"]).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
+	if ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		e.deploymentErr = fmt.Sprintf("Cannot resolve deployment metrics: %v", err)
 		return
 	}
 	deployments, err := e.client.Resource(supportedResources["deployments"]).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
+	if ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		e.deploymentErr = fmt.Sprintf("Cannot read deployments for metrics: %v", err)
 		return
@@ -364,6 +386,9 @@ func (m *MetricsManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	snapshot, err := m.snapshot(ctx, cluster, kind)
 	if err != nil {
+		if r.Context().Err() != nil {
+			return
+		}
 		http.Error(w, fmt.Sprintf("metrics unavailable: %v", err), http.StatusBadGateway)
 		return
 	}

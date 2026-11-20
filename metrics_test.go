@@ -324,3 +324,46 @@ func TestMetricsIncludesRestartableSidecars(t *testing.T) {
 		t.Fatalf("sidecar omitted or completed init counted: %+v", p)
 	}
 }
+
+func TestMetricsCancellationDoesNotPoisonSharedCache(t *testing.T) {
+	for _, stage := range []string{"pods", "metrics", "replicasets", "deployments"} {
+		t.Run(stage, func(t *testing.T) {
+			m, client := metricsFixture(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			first := true
+			client.PrependReactor("list", "*", func(action ktesting.Action) (bool, runtime.Object, error) {
+				match := action.GetResource().Resource == stage
+				if stage == "pods" {
+					match = action.GetResource() == supportedResources["pods"]
+				}
+				if stage == "metrics" {
+					match = action.GetResource() == podMetricsGVR
+				}
+				if first && match {
+					first = false
+					cancel()
+					return true, nil, context.Canceled
+				}
+				return false, nil, nil
+			})
+			request := httptest.NewRequest("GET", "/api/metrics/ctx/deployments", nil).WithContext(ctx)
+			response := httptest.NewRecorder()
+			m.ServeHTTP(response, request)
+			if response.Body.Len() != 0 {
+				t.Fatalf("cancelled request wrote error: %s", response.Body.String())
+			}
+			// The next subscriber should collect immediately, without a 15-second wait.
+			snapshot, err := m.snapshot(context.Background(), "ctx", "deployments")
+			if err != nil || snapshot.Error != "" {
+				t.Fatalf("cached cancellation: %+v %v", snapshot, err)
+			}
+			if snapshot.Items["deployment"].Reporting != 2 {
+				t.Fatalf("retry did not collect deployment metrics: %+v", snapshot)
+			}
+			if len(snapshot.Pods["old"].History) != 1 || snapshot.Pods["old"].History[0].Usage == nil {
+				t.Fatal("cancellation created an artificial gap")
+			}
+		})
+	}
+}
