@@ -201,7 +201,7 @@ describe('App', () => {
 
     expect(MockEventSource.instances[0].url).toBe('/sse/dev/events')
     expect(screen.getByRole('combobox', { name: 'Context' })).toHaveTextContent('dev')
-    expect(screen.getByRole('combobox', { name: 'Resource' })).toHaveTextContent('events')
+    expect(screen.getByRole('combobox', { name: 'Resource' })).toHaveTextContent('Events')
   })
 
   it('renders Helm releases with history details', async () => {
@@ -296,7 +296,7 @@ describe('App', () => {
     await chooseOption(user, contextSelect, /dev/)
     expect(window.location.pathname).toBe('/view/dev/pods')
 
-    await chooseOption(user, resourceSelect, 'events')
+    await chooseOption(user, resourceSelect, 'Events')
     expect(window.location.pathname).toBe('/view/dev/events')
   })
 
@@ -328,7 +328,7 @@ describe('App', () => {
 
     const [contextSelect, resourceSelect] = await screen.findAllByRole('combobox')
     await chooseOption(user, contextSelect, /dev/)
-    await chooseOption(user, resourceSelect, 'events')
+    await chooseOption(user, resourceSelect, 'Events')
     expect(window.location.pathname).toBe('/view/dev/events')
 
     window.history.back()
@@ -337,7 +337,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(window.location.pathname).toBe('/view/dev/pods')
     })
-    expect(screen.getByRole('combobox', { name: 'Resource' })).toHaveTextContent('pods')
+    expect(screen.getByRole('combobox', { name: 'Resource' })).toHaveTextContent('Pods')
   })
 
   it('renders pod rows with restart age and copy feedback', async () => {
@@ -568,7 +568,7 @@ describe('App', () => {
 
     const [contextSelect, resourceSelect] = await screen.findAllByRole('combobox')
     await chooseOption(user, contextSelect, /dev/)
-    await chooseOption(user, resourceSelect, 'events')
+    await chooseOption(user, resourceSelect, 'Events')
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
     const eventsStream = MockEventSource.instances.at(-1)!
 
@@ -609,7 +609,7 @@ describe('App', () => {
     expect(await screen.findByRole('row', { name: /api-7d9f/ })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /NODE/ }))
-    await chooseOption(user, resourceSelect, 'events')
+    await chooseOption(user, resourceSelect, 'Events')
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
     const eventsStream = MockEventSource.instances.at(-1)!
 
@@ -652,7 +652,7 @@ describe('App', () => {
     await screen.findAllByRole('combobox')
     expect(screen.getByLabelText('Status equals')).toBeInTheDocument()
 
-    await chooseOption(user, screen.getByRole('combobox', { name: 'Resource' }), 'services')
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Resource' }), 'Services')
 
     expect(screen.queryByLabelText('Status equals')).not.toBeInTheDocument()
   })
@@ -903,7 +903,7 @@ describe('App', () => {
 
     const [contextSelect, resourceSelect] = await screen.findAllByRole('combobox')
     await chooseOption(user, contextSelect, /dev/)
-    await chooseOption(user, resourceSelect, 'deployments')
+    await chooseOption(user, resourceSelect, 'Deployments')
     await waitFor(() => expect(MockEventSource.instances.some(instance => instance.url === '/sse/dev/deployments')).toBe(true))
     const deploymentStream = MockEventSource.instances.find(instance => instance.url === '/sse/dev/deployments')!
 
