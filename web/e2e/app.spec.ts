@@ -488,3 +488,27 @@ test('keeps resource browsing available when the Metrics API is missing', async 
   await page.getByRole('tab', { name: 'YAML' }).click()
   await expect(page.locator('.yaml-editor')).toBeVisible()
 })
+
+test('keeps sparklines beside values when columns have room and wraps them when narrow', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/view/dev/pods')
+  const row = page.getByRole('row', { name: /api-7d9f/ })
+  await expect(row).toContainText('125m')
+  const cells = [row.getByRole('cell').filter({ has: page.getByText('125m', { exact: true }) }), row.getByRole('cell').filter({ has: page.getByText('128 MiB', { exact: true }) })]
+  for (const cell of cells) {
+    const value = await cell.locator('span').boundingBox()
+    const graph = await cell.getByRole('img').boundingBox()
+    expect(value).not.toBeNull()
+    expect(graph).not.toBeNull()
+    expect(Math.abs(value!.y + value!.height / 2 - graph!.y - graph!.height / 2)).toBeLessThan(2)
+    expect(graph!.x).toBeGreaterThan(value!.x + value!.width)
+  }
+  await page.setViewportSize({ width: 720, height: 900 })
+  for (const cell of cells) {
+    await expect.poll(async () => {
+      const value = await cell.locator('span').boundingBox()
+      const graph = await cell.getByRole('img').boundingBox()
+      return graph!.y >= value!.y + value!.height
+    }).toBe(true)
+  }
+})

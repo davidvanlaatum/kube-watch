@@ -41,7 +41,7 @@ export function UsageChart({ points, metric, now, compact = false, request = 0, 
   const nearest = hover === null ? undefined : values.reduce<typeof values[number] | undefined>((best, p) => !best || Math.abs(p.time - hover) < Math.abs(best.time - hover) ? p : best, undefined)
   const label = `${metric === 'cpu' ? 'CPU' : 'Memory'} usage over the last 15 minutes`
   return (
-    <Box sx={{ minWidth: 0, color: theme => theme.palette.mode === 'dark' ? theme.palette.primary.light : theme.palette.primary.main, width: compact ? 90 : '100%' }}>
+    <Box sx={{ minWidth: 0, color: theme => theme.palette.mode === 'dark' ? theme.palette.primary.light : theme.palette.primary.main, width: compact ? 90 : '100%', flexShrink: 0 }}>
       <svg role="img" aria-label={label} viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', display: 'block' }}
         onPointerLeave={() => setHover(null)}
         onPointerMove={compact ? undefined : event => {

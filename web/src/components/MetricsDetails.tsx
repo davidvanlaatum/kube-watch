@@ -9,8 +9,8 @@ export function metricColumns(snapshot?: MetricsSnapshot): Column[] {
     sortValue: object => snapshot?.items?.[object.metadata?.uid]?.usage?.[metric] ?? -1,
     value: object => {
       const w = snapshot?.items?.[object.metadata?.uid]
-      return <Stack sx={{ alignItems: 'flex-end' }} title={w ? coverage(w, object.kind === 'Deployment') : 'Metrics unavailable'}>
-        <span>{formatUsage(w?.usage?.[metric], metric)}{w && w.reporting < w.expected && w.usage ? ' *' : ''}</span>
+      return <Stack direction="row" sx={{ flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 0.75 }} title={w ? coverage(w, object.kind === 'Deployment') : 'Metrics unavailable'}>
+        <span style={{ whiteSpace: 'nowrap' }}>{formatUsage(w?.usage?.[metric], metric)}{w && w.reporting < w.expected && w.usage ? ' *' : ''}</span>
         {w && snapshot && <UsageChart points={w.history} metric={metric} now={snapshot.time} compact />}
       </Stack>
     },
