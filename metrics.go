@@ -29,8 +29,9 @@ type usage struct {
 	Memory float64 `json:"memory"` // bytes
 }
 type metricPoint struct {
-	Time  int64  `json:"time"`
-	Usage *usage `json:"usage"`
+	Time         int64             `json:"time"`
+	Usage        *usage            `json:"usage"`
+	Aggregations map[string]*usage `json:"aggregations,omitempty"`
 }
 type containerUsage struct {
 	Name     string `json:"name"`
@@ -39,17 +40,18 @@ type containerUsage struct {
 	Limits   usage  `json:"limits"`
 }
 type workloadMetrics struct {
-	UID        string           `json:"uid"`
-	Name       string           `json:"name"`
-	Usage      *usage           `json:"usage"`
-	Requests   usage            `json:"requests"`
-	Limits     usage            `json:"limits"`
-	Reporting  int              `json:"reporting"`
-	Expected   int              `json:"expected"`
-	Containers []containerUsage `json:"containers,omitempty"`
-	Pods       []string         `json:"pods,omitempty"`
-	History    []metricPoint    `json:"history"`
-	Updated    int64            `json:"updated"`
+	UID          string            `json:"uid"`
+	Name         string            `json:"name"`
+	Usage        *usage            `json:"usage"`
+	Requests     usage             `json:"requests"`
+	Limits       usage             `json:"limits"`
+	Reporting    int               `json:"reporting"`
+	Expected     int               `json:"expected"`
+	Containers   []containerUsage  `json:"containers,omitempty"`
+	Pods         []string          `json:"pods,omitempty"`
+	History      []metricPoint     `json:"history"`
+	Updated      int64             `json:"updated"`
+	Aggregations map[string]*usage `json:"aggregations,omitempty"`
 }
 type metricsSnapshot struct {
 	Time  int64                       `json:"time"`
@@ -186,6 +188,7 @@ func (e *metricsEntry) record(w *workloadMetrics, now time.Time) {
 	point := metricPoint{Time: sampleTime}
 	if w.Reporting == w.Expected {
 		point.Usage = w.Usage
+		point.Aggregations = w.Aggregations
 	}
 	// Keep unavailable and incomplete samples as gaps rather than implying usage dropped.
 	points = append(points, point)
@@ -314,6 +317,7 @@ func (e *metricsEntry) refreshDeployments(ctx context.Context, now time.Time) {
 	e.deployments = make(map[string]*workloadMetrics)
 	for _, deployment := range deployments.Items {
 		w := &workloadMetrics{UID: string(deployment.GetUID()), Name: deployment.GetName()}
+		var readings []usage
 		for _, pod := range e.podObjects {
 			if owners[controllerUID(pod, "ReplicaSet")] != w.UID {
 				continue
@@ -327,19 +331,35 @@ func (e *metricsEntry) refreshDeployments(ctx context.Context, now time.Time) {
 			addUsage(&w.Limits, p.Limits)
 			w.Expected++
 			if p.Usage != nil && p.Reporting == p.Expected {
-				if w.Usage == nil {
-					w.Usage = &usage{}
-				}
-				addUsage(w.Usage, *p.Usage)
+				readings = append(readings, *p.Usage)
 				w.Reporting++
 				if w.Updated == 0 || p.Updated < w.Updated {
 					w.Updated = p.Updated
 				}
 			}
 		}
+		w.Aggregations = aggregatePodUsage(readings)
+		w.Usage = w.Aggregations["sum"]
 		e.record(w, now)
 		e.deployments[w.UID] = w
 	}
+}
+
+// Aggregate CPU and memory independently across fully reporting pods.
+func aggregatePodUsage(readings []usage) map[string]*usage {
+	if len(readings) == 0 {
+		return nil
+	}
+	total, minimum, maximum := usage{}, readings[0], readings[0]
+	for _, reading := range readings {
+		addUsage(&total, reading)
+		minimum.CPU = min(minimum.CPU, reading.CPU)
+		minimum.Memory = min(minimum.Memory, reading.Memory)
+		maximum.CPU = max(maximum.CPU, reading.CPU)
+		maximum.Memory = max(maximum.Memory, reading.Memory)
+	}
+	average := usage{CPU: total.CPU / float64(len(readings)), Memory: total.Memory / float64(len(readings))}
+	return map[string]*usage{"sum": &total, "avg": &average, "min": &minimum, "max": &maximum}
 }
 
 func controllerUID(object unstructured.Unstructured, kind string) string {

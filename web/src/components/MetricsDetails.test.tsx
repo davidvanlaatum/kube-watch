@@ -2,7 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { metricColumns, MetricsDetails } from './MetricsDetails'
 import { sortItems } from '../resourceSort'
-import type { MetricsSnapshot, WorkloadMetrics } from '../metrics'
+import { allocationLabel, withAggregation, type MetricsSnapshot, type WorkloadMetrics } from '../metrics'
 
 afterEach(cleanup)
 const zero = { cpu: 0, memory: 0 }
@@ -90,5 +90,48 @@ describe('list allocation comparisons', () => {
   it('uses deployment ownership pods to verify allocation coverage', () => {
     show({ ...workload, uid: 'deployment', containers: undefined, pods: ['pod'] }, true, { pod: workload })
     expect(screen.getByText('/ 500m limit (25%)')).toBeInTheDocument()
+  })
+})
+
+describe('deployment aggregations', () => {
+  const makePod = (uid: string, cpu: number, memory: number, cpuLimit: number, memoryLimit: number): WorkloadMetrics => ({
+    ...pod, uid, name: uid, reporting: 1, expected: 1, usage: { cpu, memory }, requests: zero, limits: { cpu: cpuLimit, memory: memoryLimit },
+    containers: [{ name: 'app', usage: { cpu, memory }, requests: zero, limits: { cpu: cpuLimit, memory: memoryLimit } }],
+  })
+  const a = makePod('a', 100, 400, 200, 800), b = makePod('b', 300, 100, 600, 200)
+  const aggregations = { sum: { cpu: 400, memory: 500 }, avg: { cpu: 200, memory: 250 }, min: { cpu: 100, memory: 100 }, max: { cpu: 300, memory: 400 } }
+  const deployment: WorkloadMetrics = { ...pod, uid: 'deployment', containers: undefined, pods: ['a', 'b'], reporting: 2, expected: 2, usage: aggregations.sum, requests: zero, limits: { cpu: 800, memory: 1000 }, aggregations, history: [{ time: 100_000, usage: aggregations.sum, aggregations }, { time: 115_000, usage: null }] }
+  const data = { ...snapshot, items: { deployment }, pods: { a, b } }
+  it('switches current values and retained chart samples without changing the source snapshot', () => {
+    for (const mode of ['sum', 'avg', 'min', 'max'] as const) {
+      const selected = withAggregation(deployment, mode)!
+      expect(selected.usage).toEqual(aggregations[mode])
+      expect(selected.history[0].usage).toEqual(aggregations[mode])
+      expect(selected.history[1].usage).toBeNull()
+    }
+    expect(deployment.usage).toEqual(aggregations.sum)
+    expect(withAggregation(undefined, 'min')).toBeUndefined()
+    expect(withAggregation({ ...deployment, aggregations: undefined }, 'avg')?.usage).toBeNull()
+  })
+  it('uses average allocations for averages and the supplying pod allocation for extrema', () => {
+    const average = withAggregation(deployment, 'avg')!
+    expect(allocationLabel(average, 'cpu', data, 'avg')).toBe(' / 400m limit (50%)')
+    const minimum = withAggregation(deployment, 'min')!
+    expect(allocationLabel(minimum, 'cpu', data, 'min')).toBe(' / 200m limit (50%)')
+    expect(allocationLabel(minimum, 'memory', data, 'min')).toContain('limit (50%)')
+    const maximum = withAggregation(deployment, 'max')!
+    expect(allocationLabel(maximum, 'cpu', data, 'max')).toBe(' / 600m limit (50%)')
+    expect(allocationLabel(maximum, 'memory', data, 'max')).toContain('limit (50%)')
+    expect(allocationLabel({ ...maximum, reporting: 1 }, 'cpu', data, 'max')).toBe(' / 600m limit')
+    expect(allocationLabel({ ...minimum, pods: [] }, 'cpu', data, 'min')).toBe(' · no reporting pods')
+  })
+  it('uses the selected statistic for sorting and labels detail charts', () => {
+    const column = metricColumns(data, 'max')[0]
+    expect(column.header).toBe('CPU (MAX)')
+    expect(column.sortValue?.({ metadata: { uid: 'deployment' } })).toBe(300)
+    render(<MetricsDetails workload={deployment} snapshot={data} deployment aggregation="max" />)
+    expect(screen.getByText('CPU (Maximum): 300m')).toBeInTheDocument()
+    expect(screen.getByText(/Maximum across reporting pods/)).toBeInTheDocument()
+    expect(screen.getByText(/Allocation reference lines follow the current pod/)).toBeInTheDocument()
   })
 })

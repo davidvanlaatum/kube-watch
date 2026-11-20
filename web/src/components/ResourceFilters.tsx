@@ -12,10 +12,13 @@ import {
   Stack,
   TextField,
 } from '@mui/material'
+import { AggregationSelect } from './AggregationSelect'
+import type { Aggregation } from '../metrics'
 import type { TableFilters } from '../types'
 
 type ResourceFiltersProps = {
   resource: string
+  aggregation?: { value: Aggregation; onChange: (value: Aggregation) => void }
   filters: TableFilters
   showStatusFilter: boolean
   statusFilterSuggestions: string[]
@@ -29,6 +32,7 @@ type ResourceFiltersProps = {
 
 export function ResourceFilters({
   resource,
+  aggregation,
   filters,
   showStatusFilter,
   statusFilterSuggestions,
@@ -112,6 +116,7 @@ export function ResourceFilters({
             label="Not ready"
           />
         )}
+        {aggregation && <AggregationSelect {...aggregation} />}
         {hasActiveFilters && (
           <Button type="button" variant="outlined" onClick={onClearFilters}>
             Clear filters

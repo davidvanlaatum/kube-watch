@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Box, CircularProgress } from '@mui/material'
 import { useMetrics } from '../hooks/useMetrics'
-import { supportsMetrics } from '../metrics'
+import { supportsMetrics, type Aggregation } from '../metrics'
 import { metricColumns, MetricsDetails } from './MetricsDetails'
 import { BackendLogToasts } from './BackendLogToasts'
 import { DetailsDrawer } from './DetailsDrawer'
@@ -27,6 +27,7 @@ type KubeWatchBodyProps = {
 
 export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
   const [filters, setFilters] = useState<TableFilters>(emptyFilters)
+  const [aggregation, setAggregation] = useState<Aggregation>('sum')
   const [sort, setSort] = useState<SortState>(null)
   const [logTailLines, setLogTailLines] = useState(200)
   const mainRef = useRef<HTMLElement | null>(null)
@@ -72,7 +73,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
 
   const definition = resourceDefinition(resource) || resourceRegistry.pods
   const metrics = useMetrics(ctx, resource)
-  const columns = supportsMetrics(resource) ? [...definition.columns, ...metricColumns(metrics.snapshot)] : definition.columns
+  const columns = supportsMetrics(resource) ? [...definition.columns, ...metricColumns(metrics.snapshot, resource === 'deployments' ? aggregation : undefined)] : definition.columns
   const allItems = [...items.values()]
   const labelFilterSuggestions = useMemo(() => labelSuggestions(allItems), [allItems])
   const showStatusFilter = definition.supports.statusFilter
@@ -143,6 +144,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
       {supportsMetrics(resource) && metrics.error && <Alert severity="warning" sx={{ mb: 2 }}>{metrics.error}</Alert>}
       <ResourceFilters
         resource={resource}
+        aggregation={resource === 'deployments' ? { value: aggregation, onChange: setAggregation } : undefined}
         filters={filters}
         showStatusFilter={showStatusFilter}
         statusFilterSuggestions={statusFilterSuggestions}
@@ -213,7 +215,7 @@ export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
           error: logsError,
           entries: sortedLogEntries,
         }}
-        metrics={<MetricsDetails workload={metrics.snapshot?.items?.[selectedItem?.metadata?.uid]} snapshot={metrics.snapshot} deployment={resource === 'deployments'} error={metrics.error} />}
+        metrics={<MetricsDetails workload={metrics.snapshot?.items?.[selectedItem?.metadata?.uid]} snapshot={metrics.snapshot} deployment={resource === 'deployments'} aggregation={aggregation} onAggregationChange={setAggregation} error={metrics.error} />}
         formatters={{
           formatLogTimestamp,
           logEntryKey,

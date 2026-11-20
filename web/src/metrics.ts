@@ -1,5 +1,7 @@
+export type Aggregation = 'sum' | 'avg' | 'min' | 'max'
+export const aggregationLabels: Record<Aggregation, string> = { sum: 'Sum', avg: 'Average', min: 'Minimum', max: 'Maximum' }
 export type Usage = { cpu: number; memory: number }
-export type MetricPoint = { time: number; usage: Usage | null }
+export type MetricPoint = { time: number; usage: Usage | null; aggregations?: Partial<Record<Aggregation, Usage | null>> }
 export type ContainerMetrics = { name: string; usage: Usage | null; requests: Usage; limits: Usage }
 export type WorkloadMetrics = {
   uid: string
@@ -13,6 +15,7 @@ export type WorkloadMetrics = {
   pods?: string[]
   history: MetricPoint[]
   updated: number
+  aggregations?: Partial<Record<Aggregation, Usage | null>>
 }
 export type MetricsSnapshot = {
   time: number
@@ -39,11 +42,31 @@ function allocationComplete(workload: WorkloadMetrics, field: 'requests' | 'limi
   return pods.length > 0 && pods.length === workload.expected && pods.every(pod => pod && allocationComplete(pod, field, metric, snapshot))
 }
 
-export function allocationLabel(workload: WorkloadMetrics, metric: keyof Usage, snapshot: MetricsSnapshot) {
-  const completeLimit = allocationComplete(workload, 'limits', metric, snapshot)
-  const completeRequest = allocationComplete(workload, 'requests', metric, snapshot)
-  const field = completeLimit ? 'limits' : completeRequest ? 'requests' : workload.limits[metric] > 0 ? 'limits' : 'requests'
-  const value = workload[field][metric]
+export function allocationSource(workload: WorkloadMetrics, metric: keyof Usage, snapshot: MetricsSnapshot, aggregation: Aggregation) {
+  if (aggregation !== 'min' && aggregation !== 'max') return workload
+  const pods = (workload.pods || []).flatMap(uid => snapshot.pods?.[uid] ? [snapshot.pods[uid]] : []).filter(pod => pod.usage && pod.reporting === pod.expected)
+  return pods.reduce<WorkloadMetrics | undefined>((selected, pod) => !selected || (aggregation === 'min' ? pod.usage![metric] < selected.usage![metric] : pod.usage![metric] > selected.usage![metric]) ? pod : selected, undefined)
+}
+
+export function withAggregation(workload: WorkloadMetrics | undefined, aggregation: Aggregation): WorkloadMetrics | undefined {
+  if (!workload || aggregation === 'sum') return workload
+  const divisor = aggregation === 'avg' && workload.expected > 0 ? workload.expected : 1
+  const divide = (value: Usage): Usage => ({ cpu: value.cpu / divisor, memory: value.memory / divisor })
+  return {
+    ...workload,
+    usage: workload.aggregations?.[aggregation] ?? null,
+    requests: divide(workload.requests), limits: divide(workload.limits),
+    history: workload.history.map(point => ({ ...point, usage: point.aggregations?.[aggregation] ?? null })),
+  }
+}
+
+export function allocationLabel(workload: WorkloadMetrics, metric: keyof Usage, snapshot: MetricsSnapshot, aggregation: Aggregation = 'sum') {
+  const source = allocationSource(workload, metric, snapshot, aggregation)
+  if (!source) return ' · no reporting pods'
+  const completeLimit = allocationComplete(source, 'limits', metric, snapshot)
+  const completeRequest = allocationComplete(source, 'requests', metric, snapshot)
+  const field = completeLimit ? 'limits' : completeRequest ? 'requests' : source.limits[metric] > 0 ? 'limits' : 'requests'
+  const value = source[field][metric]
   if (!value) return ' · no request/limit'
   const complete = field === 'limits' ? completeLimit : completeRequest
   const percentage = complete && workload.usage && workload.reporting === workload.expected

@@ -41,7 +41,7 @@ Key design decisions
 
 - Dynamic client + unstructured: supports many resources without generating typed clients.
 - Namespaced default: respecting RBAC is a priority; the backend reads context default namespace and watches that namespace. If cluster-list is permitted, cluster-scoped list/watch can be used (previous behavior) but the default avoids Forbidden errors.
-- Resource usage: on-demand Metrics API polling with 15-minute in-memory history, SVG sparklines, and a Metrics detail tab for Pods/Deployments; deployment aggregation follows controller ownership through ReplicaSets.
+- Resource usage: on-demand Metrics API polling with 15-minute in-memory history, SVG sparklines, and a Metrics detail tab for Pods/Deployments; deployment sum/average/minimum/maximum aggregation follows controller ownership through ReplicaSets and uses one shared list/detail selector without extra collection requests.
 - Shared watches: one watch per (context,resource,namespace) reduces duplicate API calls when multiple UI clients connect.
 - In-memory snapshot cache: new Kubernetes resource subscribers receive a complete replacement snapshot so reconnects remove stale objects even if the watch started earlier.
 - Kubeconfig loading: client-go default loading rules are used so `$KUBECONFIG` multi-file configs and fallback to `~/.kube/config` behave like kubectl.

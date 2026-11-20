@@ -533,3 +533,64 @@ test('compares list usage to a limit or falls back to the request', async ({ pag
   await expect(row).toContainText('/ 100m request (125%)')
   await expect(row).toContainText('/ 256 MiB limit (50%)')
 })
+
+test('switches deployment list and detail charts between pod aggregates without refetching', async ({ page }, testInfo) => {
+  const mib = 1024 ** 2
+  const a = workloadMetrics('a', 'api-a', 100), b = workloadMetrics('b', 'api-b', 300)
+  a.usage.memory = 400 * mib; b.usage.memory = 100 * mib
+  a.limits = { cpu: 200, memory: 800 * mib }; b.limits = { cpu: 600, memory: 200 * mib }
+  a.containers[0].usage = a.usage; b.containers[0].usage = b.usage
+  a.containers[0].limits = a.limits; b.containers[0].limits = b.limits
+  const aggregations = { sum: { cpu: 400, memory: 500 * mib }, avg: { cpu: 200, memory: 250 * mib }, min: { cpu: 100, memory: 100 * mib }, max: { cpu: 300, memory: 400 * mib } }
+  const total = {
+    ...workloadMetrics('deployment-1', 'api'), usage: aggregations.sum, aggregations, pods: ['a', 'b'], containers: undefined, reporting: 2, expected: 2,
+    requests: { cpu: 200, memory: 128 * mib }, limits: { cpu: 800, memory: 1000 * mib },
+    history: Array.from({ length: 61 }, (_, i) => {
+      const factor = 1 + Math.sin((i - 60) / 6) * 0.2
+      const readings = Object.fromEntries(Object.entries(aggregations).map(([key, value]) => [key, { cpu: value.cpu * factor, memory: value.memory * factor }]))
+      return { time: metricsNow - (60 - i) * 15_000, usage: i === 30 ? null : readings.sum, aggregations: i === 30 ? undefined : readings }
+    }),
+  }
+  const deployment = { kind: 'Deployment', metadata: { uid: 'deployment-1', name: 'api', namespace: 'default' }, spec: { replicas: 2 }, status: { readyReplicas: 2 } }
+  let requests = 0
+  await page.route('**/api/metrics/dev/deployments', route => { requests++; return route.fulfill({ json: { time: metricsNow, items: { 'deployment-1': total }, pods: { a, b } } }) })
+  await page.route('**/sse/dev/deployments', route => route.fulfill({ contentType: 'text/event-stream', body: `data: ${JSON.stringify({ type: 'SNAPSHOT', objects: [deployment] })}\n\n` }))
+  await page.goto('/view/dev/deployments')
+  const row = page.locator('.resource-table').getByRole('row', { name: /api/ })
+  await expect(row).toContainText('400m')
+  await expect(page.getByRole('columnheader', { name: /CPU \(SUM\)/ })).toBeVisible()
+  await captureReadmeScreenshot(page, 'deployment-overview.png', screenshotTheme(testInfo), { x: 0, y: 0, width: 1280, height: 320 })
+  await page.getByRole('combobox', { name: 'Pod aggregation' }).click()
+  await page.getByRole('option', { name: 'Average', exact: true }).click()
+  await expect(row).toContainText('200m / 400m limit (50%)')
+  await row.click()
+  await page.getByRole('tab', { name: 'Metrics' }).click()
+  const panel = page.locator('.details-panel')
+  await expect(panel.getByText('CPU (Average): 200m')).toBeVisible()
+  const cpuChart = panel.getByRole('img', { name: 'CPU usage over the last 15 minutes' })
+  const chartBox = (await cpuChart.boundingBox())!
+  await cpuChart.hover({ position: { x: chartBox.width - 3, y: chartBox.height / 2 } })
+  await expect(panel.getByText('00:00:00: 200m', { exact: true })).toBeVisible()
+  await panel.getByRole('combobox', { name: 'Pod aggregation' }).click()
+  await page.getByRole('option', { name: 'Maximum', exact: true }).click()
+  await expect(row).toContainText('300m / 600m limit (50%)')
+  await expect(panel.getByText('CPU (Maximum): 300m')).toBeVisible()
+  await cpuChart.hover({ position: { x: chartBox.width - 3, y: chartBox.height / 2 } })
+  await expect(panel.getByText('00:00:00: 300m', { exact: true })).toBeVisible()
+  await page.getByRole('combobox', { name: 'Pod aggregation' }).first().click()
+  await page.getByRole('option', { name: 'Minimum', exact: true }).click()
+  await expect(row).toContainText('100m / 200m limit (50%)')
+  await expect(panel.getByText('CPU (Minimum): 100m')).toBeVisible()
+  expect(requests).toBe(1)
+  await page.getByRole('button', { name: 'Maximize details' }).click()
+  await expect.poll(async () => (await panel.boundingBox())?.y || 0).toBeLessThan(20)
+  await panel.getByRole('combobox', { name: 'Pod aggregation' }).click()
+  await page.getByRole('option', { name: 'Sum', exact: true }).click()
+  await expect(panel.getByText('CPU (Sum): 400m')).toBeVisible()
+  await panel.getByRole('combobox', { name: 'Pod aggregation' }).click()
+  await page.getByRole('option', { name: 'Maximum', exact: true }).click()
+  await expect(panel.getByText('CPU (Maximum): 300m')).toBeVisible()
+  await page.mouse.move(0, 0)
+  await expect(page.getByRole('listbox', { includeHidden: true })).toHaveCount(0)
+  await captureReadmeScreenshot(page, 'deployment-metrics.png', screenshotTheme(testInfo))
+})

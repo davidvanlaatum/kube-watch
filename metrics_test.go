@@ -424,3 +424,30 @@ func TestMetricsCollectionFailuresLogOncePerCollection(t *testing.T) {
 		t.Fatal("cached response repeated collection logs")
 	}
 }
+
+func TestDeploymentUsageAggregations(t *testing.T) {
+	if aggregatePodUsage(nil) != nil {
+		t.Fatal("missing pods must not produce zero-valued aggregates")
+	}
+	values := aggregatePodUsage([]usage{{CPU: 100, Memory: 900}, {CPU: 300, Memory: 100}, {CPU: 0, Memory: 500}})
+	for name, expected := range map[string]usage{"sum": {CPU: 400, Memory: 1500}, "avg": {CPU: 400.0 / 3, Memory: 500}, "min": {CPU: 0, Memory: 100}, "max": {CPU: 300, Memory: 900}} {
+		if *values[name] != expected {
+			t.Errorf("%s = %+v, want %+v", name, values[name], expected)
+		}
+	}
+	m, _ := metricsFixture(t)
+	snapshot, err := m.snapshot(context.Background(), "ctx", "deployments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment := snapshot.Items["deployment"]
+	if deployment.Aggregations["sum"].CPU != 250 || deployment.Aggregations["avg"].CPU != 125 || deployment.History[0].Aggregations["avg"].CPU != 125 {
+		t.Fatalf("aggregates not retained in deployment history: %+v", deployment)
+	}
+	e := &metricsEntry{histories: map[string][]metricPoint{}}
+	incomplete := &workloadMetrics{UID: "deployment", Usage: values["sum"], Aggregations: values, Reporting: 1, Expected: 2}
+	e.record(incomplete, time.Now())
+	if incomplete.History[0].Aggregations != nil || incomplete.History[0].Usage != nil {
+		t.Fatal("incomplete aggregates should remain chart gaps")
+	}
+}
