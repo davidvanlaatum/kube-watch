@@ -1,0 +1,595 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/rest"
+	ktesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/clientcmd/api"
+)
+
+func metricsObject(kind, name, uid string) *unstructured.Unstructured {
+	version := "v1"
+	if kind == "Deployment" || kind == "ReplicaSet" {
+		version = "apps/v1"
+	}
+	if kind == "PodMetrics" {
+		version = "metrics.k8s.io/v1beta1"
+	}
+	return &unstructured.Unstructured{Object: map[string]interface{}{"apiVersion": version, "kind": kind, "metadata": map[string]interface{}{"name": name, "namespace": "test", "uid": uid}}}
+}
+func metricOwner(object *unstructured.Unstructured, kind, uid string) {
+	controller := true
+	object.SetOwnerReferences([]metav1.OwnerReference{{Kind: kind, UID: types.UID(uid), Controller: &controller}})
+}
+func metricsFixture(t *testing.T) (*MetricsManager, *fake.FakeDynamicClient) {
+	t.Helper()
+	now := time.Now()
+	objects := []runtime.Object{}
+	metricObjects := []*unstructured.Unstructured{}
+	for i, name := range []string{"old", "new", "unrelated"} {
+		pod := metricsObject("Pod", name, name)
+		metricOwner(pod, "ReplicaSet", name+"-rs")
+		pod.Object["spec"] = map[string]interface{}{"containers": []interface{}{map[string]interface{}{"name": "app", "resources": map[string]interface{}{"requests": map[string]interface{}{"cpu": "100m", "memory": "64Mi"}, "limits": map[string]interface{}{"cpu": "1", "memory": "256Mi"}}}}}
+		pod.SetCreationTimestamp(metav1.NewTime(now.Add(-time.Hour)))
+		rs := metricsObject("ReplicaSet", name+"-rs", name+"-rs")
+		owner := "deployment"
+		if i == 2 {
+			owner = "other"
+		}
+		metricOwner(rs, "Deployment", owner)
+		metric := metricsObject("PodMetrics", name, "")
+		metric.Object["timestamp"] = now.Add(-time.Second).UTC().Format(time.RFC3339Nano)
+		metric.Object["containers"] = []interface{}{map[string]interface{}{"name": "app", "usage": map[string]interface{}{"cpu": "125000000n", "memory": "128Mi"}}}
+		objects = append(objects, pod, rs)
+		metricObjects = append(metricObjects, metric)
+	}
+	objects = append(objects, metricsObject("Deployment", "web", "deployment"))
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		supportedResources["pods"]: "PodList", supportedResources["replicasets"]: "ReplicaSetList", supportedResources["deployments"]: "DeploymentList", podMetricsGVR: "PodMetricsList",
+		{Group: "metrics.k8s.io", Version: "v1", Resource: "pods"}: "PodMetricsList",
+	}, objects...)
+	for _, metric := range metricObjects {
+		if err := client.Tracker().Create(podMetricsGVR, metric, "test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := &MetricsManager{entries: map[string]*metricsEntry{}, newClient: func(string) (dynamic.Interface, string, error) { return client, "test", nil }}
+	return m, client
+}
+func TestMetricsSharedSamplingAndDeploymentRollout(t *testing.T) {
+	m, client := metricsFixture(t)
+	podSnapshot, err := m.snapshot(context.Background(), "ctx", "pods")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(podSnapshot.Items) != 3 || podSnapshot.Error != "" {
+		t.Fatalf("snapshot: %+v", podSnapshot)
+	}
+	p := podSnapshot.Items["old"]
+	if p.Usage.CPU != 125 || p.Usage.Memory != 128*1024*1024 || p.Requests.CPU != 100 || p.Limits.CPU != 1000 || p.Reporting != 1 {
+		t.Fatalf("pod: %+v", p)
+	}
+	deploymentSnapshot, err := m.snapshot(context.Background(), "ctx", "deployments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := deploymentSnapshot.Items["deployment"]
+	if d.Expected != 2 || d.Reporting != 2 || d.Usage.CPU != 250 || len(d.Pods) != 2 {
+		t.Fatalf("deployment: %+v", d)
+	}
+	before := len(client.Actions())
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := m.snapshot(context.Background(), "ctx", "deployments")
+			if err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if len(client.Actions()) != before {
+		t.Fatal("cached subscribers repeated cluster requests")
+	}
+	for _, action := range client.Actions() {
+		if action.GetNamespace() != "test" {
+			t.Fatalf("unexpected namespace %q", action.GetNamespace())
+		}
+	}
+	// An unchanged source timestamp must not manufacture another chart sample.
+	m.entries["ctx"].polled = time.Now().Add(-metricsInterval)
+	again, _ := m.snapshot(context.Background(), "ctx", "pods")
+	if len(again.Items["old"].History) != 1 {
+		t.Fatal("duplicated source sample")
+	}
+}
+func TestMetricsMissingStaleInvalidAndReplacementSamples(t *testing.T) {
+	for _, scenario := range []string{"missing", "stale", "replacement", "invalid", "partial", "recreated"} {
+		t.Run(scenario, func(t *testing.T) {
+			m, client := metricsFixture(t)
+			metric, err := client.Resource(podMetricsGVR).Namespace("test").Get(context.Background(), "old", metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch scenario {
+			case "missing":
+				err = client.Resource(podMetricsGVR).Namespace("test").Delete(context.Background(), "old", metav1.DeleteOptions{})
+			case "stale":
+				metric.Object["timestamp"] = time.Now().Add(-2 * time.Minute).Format(time.RFC3339Nano)
+			case "replacement":
+				metric.SetUID("previous-pod")
+			case "invalid":
+				metric.Object["containers"] = []interface{}{map[string]interface{}{"name": "app", "usage": map[string]interface{}{"cpu": "bogus", "memory": "-1"}}}
+			case "recreated":
+				pod, _ := client.Resource(supportedResources["pods"]).Namespace("test").Get(context.Background(), "old", metav1.GetOptions{})
+				pod.SetCreationTimestamp(metav1.NewTime(time.Now()))
+				_, err = client.Resource(supportedResources["pods"]).Namespace("test").Update(context.Background(), pod, metav1.UpdateOptions{})
+			case "partial":
+				pod, _ := client.Resource(supportedResources["pods"]).Namespace("test").Get(context.Background(), "old", metav1.GetOptions{})
+				_ = unstructured.SetNestedSlice(pod.Object, []interface{}{map[string]interface{}{"name": "app"}, map[string]interface{}{"name": "sidecar"}}, "spec", "containers")
+				_, err = client.Resource(supportedResources["pods"]).Namespace("test").Update(context.Background(), pod, metav1.UpdateOptions{})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario != "missing" {
+				_, err = client.Resource(podMetricsGVR).Namespace("test").Update(context.Background(), metric, metav1.UpdateOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			s, err := m.snapshot(context.Background(), "ctx", "deployments")
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := s.Items["deployment"]
+			if d.Reporting != 1 || d.Expected != 2 || d.Usage.CPU != 125 {
+				t.Fatalf("incomplete total: %+v", d)
+			}
+			if d.History[len(d.History)-1].Usage != nil {
+				t.Fatal("incomplete deployment total plotted as a complete sample")
+			}
+			if scenario != "partial" && s.Pods["old"].Usage != nil {
+				t.Fatal("missing readings reported as usage")
+			}
+		})
+	}
+}
+func TestMetricsFailuresAndRecovery(t *testing.T) {
+	for _, resource := range []string{"pods", "replicasets", "deployments"} {
+		t.Run(resource, func(t *testing.T) {
+			m, client := metricsFixture(t)
+			fail := true
+			client.PrependReactor("list", resource, func(action ktesting.Action) (bool, runtime.Object, error) {
+				if fail && action.GetResource().Group != "metrics.k8s.io" {
+					return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: resource}, "", errors.New("denied"))
+				}
+				return false, nil, nil
+			})
+			snapshot, err := m.snapshot(context.Background(), "ctx", "deployments")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(snapshot.Error, "denied") {
+				t.Fatalf("error not surfaced: %+v", snapshot)
+			}
+			fail = false
+			m.entries["ctx"].polled = time.Now().Add(-metricsInterval)
+			snapshot, err = m.snapshot(context.Background(), "ctx", "deployments")
+			if err != nil || snapshot.Error != "" || snapshot.Items["deployment"].Reporting != 2 {
+				t.Fatalf("recovery: %+v %v", snapshot, err)
+			}
+		})
+	}
+	m, client := metricsFixture(t)
+	client.PrependReactor("list", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if action.GetResource().Group == "metrics.k8s.io" {
+			return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: "metrics.k8s.io", Resource: "pods"}, "", errors.New("denied"))
+		}
+		return false, nil, nil
+	})
+	s, _ := m.snapshot(context.Background(), "ctx", "pods")
+	if s.Error == "" || s.Items["old"].Usage != nil {
+		t.Fatalf("metrics API error: %+v", s)
+	}
+}
+func TestMetricsHistoryRetentionAndGaps(t *testing.T) {
+	e := &metricsEntry{histories: map[string][]metricPoint{}}
+	now := time.Now()
+	for i := 0; i < 100; i++ {
+		e.record(&workloadMetrics{UID: "pod"}, now.Add(time.Duration(i)*metricsInterval))
+	}
+	if len(e.histories["pod"]) != 61 || e.histories["pod"][0].Usage != nil {
+		t.Fatal("history not bounded or unavailable converted to zero")
+	}
+	m, _ := metricsFixture(t)
+	m.entries["expired"] = &metricsEntry{lastUsed: now.Add(-metricsRetention - time.Second)}
+	_, err := m.snapshot(context.Background(), "ctx", "pods")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.entries["expired"] != nil {
+		t.Fatal("idle context not evicted")
+	}
+	m.entries["ctx"].histories["deleted-pod"] = []metricPoint{{Time: now.Add(-metricsRetention - time.Second).UnixMilli()}}
+	m.entries["ctx"].polled = now.Add(-metricsInterval)
+	_, _ = m.snapshot(context.Background(), "ctx", "pods")
+	if _, ok := m.entries["ctx"].histories["deleted-pod"]; ok {
+		t.Fatal("deleted pod history not expired")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err = m.snapshot(ctx, "ctx", "pods"); err == nil {
+		t.Fatal("ignored cancellation")
+	}
+}
+func TestMetricsHTTPAndClientConfig(t *testing.T) {
+	m, _ := metricsFixture(t)
+	for _, tc := range []struct {
+		path   string
+		status int
+	}{{"/api/metrics/ctx/pods", 200}, {"/api/metrics/ctx/deployments", 200}, {"/api/metrics/ctx/secrets", 400}, {"/api/metrics/ctx", 400}, {"/api/metrics//pods", 400}} {
+		w := httptest.NewRecorder()
+		m.ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))
+		if w.Code != tc.status {
+			t.Errorf("%s: %d %s", tc.path, w.Code, w.Body.String())
+		}
+	}
+	m.newClient = func(string) (dynamic.Interface, string, error) { return nil, "", errors.New("config error") }
+	w := httptest.NewRecorder()
+	m.ServeHTTP(w, httptest.NewRequest("GET", "/api/metrics/unknown/pods", nil))
+	if w.Code != 502 {
+		t.Fatal(w.Code)
+	}
+	rules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: t.TempDir() + "/missing"}
+	configured := NewMetricsManager(rules)
+	if _, _, err := configured.newClient("missing"); err == nil {
+		t.Fatal("expected config error")
+	}
+	path := t.TempDir() + "/config"
+	cfg := api.Config{Clusters: map[string]*api.Cluster{"cluster": {Server: "https://example.invalid"}}, Contexts: map[string]*api.Context{"ctx": {Cluster: "cluster"}}, CurrentContext: "ctx"}
+	if err := clientcmd.WriteToFile(cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	configured = NewMetricsManager(&clientcmd.ClientConfigLoadingRules{ExplicitPath: path})
+	if _, ns, err := configured.newClient("ctx"); err != nil || ns != "default" {
+		t.Fatalf("namespace=%s err=%v", ns, err)
+	}
+	_ = NewMetricsManager(nil)
+}
+func TestMetricsStableAPIFallback(t *testing.T) {
+	m, client := metricsFixture(t)
+	client.PrependReactor("list", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if action.GetResource() == podMetricsGVR {
+			return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "metrics.k8s.io", Resource: "pods"}, "")
+		}
+		return false, nil, nil
+	})
+	s, err := m.snapshot(context.Background(), "ctx", "pods")
+	if err != nil || s.Error != "" {
+		t.Fatalf("fallback: %+v %v", s, err)
+	}
+	stable := podMetricsGVR
+	stable.Version = "v1"
+	found := false
+	for _, action := range client.Actions() {
+		if action.GetResource() == stable {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("stable API not attempted")
+	}
+}
+
+func TestMetricsIncludesRestartableSidecars(t *testing.T) {
+	m, client := metricsFixture(t)
+	pod, err := client.Resource(supportedResources["pods"]).Namespace("test").Get(context.Background(), "old", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = unstructured.SetNestedSlice(pod.Object, []interface{}{
+		map[string]interface{}{"name": "setup"},
+		map[string]interface{}{"name": "proxy", "restartPolicy": "Always"},
+	}, "spec", "initContainers")
+	if _, err = client.Resource(supportedResources["pods"]).Namespace("test").Update(context.Background(), pod, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	metric, err := client.Resource(podMetricsGVR).Namespace("test").Get(context.Background(), "old", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	containers, _, _ := unstructured.NestedSlice(metric.Object, "containers")
+	containers = append(containers, map[string]interface{}{"name": "proxy", "usage": map[string]interface{}{"cpu": "25m", "memory": "16Mi"}})
+	_ = unstructured.SetNestedSlice(metric.Object, containers, "containers")
+	if _, err = client.Resource(podMetricsGVR).Namespace("test").Update(context.Background(), metric, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := m.snapshot(context.Background(), "ctx", "pods")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := s.Items["old"]
+	if p.Expected != 2 || p.Reporting != 2 || p.Usage.CPU != 150 || len(p.Containers) != 2 {
+		t.Fatalf("sidecar omitted or completed init counted: %+v", p)
+	}
+}
+
+func TestMetricsCancellationDoesNotPoisonSharedCache(t *testing.T) {
+	for _, stage := range []string{"pods", "metrics", "replicasets", "deployments"} {
+		t.Run(stage, func(t *testing.T) {
+			m, client := metricsFixture(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			first := true
+			client.PrependReactor("list", "*", func(action ktesting.Action) (bool, runtime.Object, error) {
+				match := action.GetResource().Resource == stage
+				if stage == "pods" {
+					match = action.GetResource() == supportedResources["pods"]
+				}
+				if stage == "metrics" {
+					match = action.GetResource() == podMetricsGVR
+				}
+				if first && match {
+					first = false
+					cancel()
+					return true, nil, context.Canceled
+				}
+				return false, nil, nil
+			})
+			request := httptest.NewRequest("GET", "/api/metrics/ctx/deployments", nil).WithContext(ctx)
+			response := httptest.NewRecorder()
+			m.ServeHTTP(response, request)
+			if response.Body.Len() != 0 {
+				t.Fatalf("cancelled request wrote error: %s", response.Body.String())
+			}
+			// The next subscriber should collect immediately, without a 15-second wait.
+			snapshot, err := m.snapshot(context.Background(), "ctx", "deployments")
+			if err != nil || snapshot.Error != "" {
+				t.Fatalf("cached cancellation: %+v %v", snapshot, err)
+			}
+			if snapshot.Items["deployment"].Reporting != 2 {
+				t.Fatalf("retry did not collect deployment metrics: %+v", snapshot)
+			}
+			if len(snapshot.Pods["old"].History) != 1 || snapshot.Pods["old"].History[0].Usage == nil {
+				t.Fatal("cancellation created an artificial gap")
+			}
+		})
+	}
+}
+
+func TestMetricsRequestFailureDiagnostics(t *testing.T) {
+	var logs bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(original) })
+	m, _ := metricsFixture(t)
+	m.newClient = func(string) (dynamic.Interface, string, error) {
+		return nil, "", errors.New("credential provider unavailable")
+	}
+	response := httptest.NewRecorder()
+	m.ServeHTTP(response, httptest.NewRequest("GET", "/api/metrics/prod/deployments", nil))
+	if response.Code != 502 || !strings.Contains(response.Body.String(), "credential provider unavailable") {
+		t.Fatalf("missing response detail: %d %s", response.Code, response.Body.String())
+	}
+	for _, detail := range []string{`"level":"ERROR"`, `"msg":"metrics request failed"`, `"cluster":"prod"`, `"resource":"deployments"`, `"duration":`, `"error":"credential provider unavailable"`} {
+		if !strings.Contains(logs.String(), detail) {
+			t.Errorf("missing %s in log: %s", detail, logs.String())
+		}
+	}
+	logs.Reset()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/metrics/prod/deployments", nil).WithContext(ctx))
+	if logs.Len() != 0 {
+		t.Fatalf("ordinary cancellation logged as failure: %s", logs.String())
+	}
+}
+
+func TestMetricsCollectionFailuresLogOncePerCollection(t *testing.T) {
+	var logs bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(original) })
+	m, client := metricsFixture(t)
+	client.PrependReactor("list", "*", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if action.GetResource() == podMetricsGVR || action.GetResource() == supportedResources["replicasets"] {
+			return true, nil, errors.New("fixture permission denied")
+		}
+		return false, nil, nil
+	})
+	if _, err := m.snapshot(context.Background(), "prod", "deployments"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), `"msg":"pod metrics unavailable"`) || !strings.Contains(logs.String(), `"msg":"deployment metrics unavailable"`) || !strings.Contains(logs.String(), `"namespace":"test"`) || !strings.Contains(logs.String(), "fixture permission denied") {
+		t.Fatalf("missing collection diagnostics: %s", logs.String())
+	}
+	before := logs.String()
+	if _, err := m.snapshot(context.Background(), "prod", "deployments"); err != nil {
+		t.Fatal(err)
+	}
+	if logs.String() != before {
+		t.Fatal("cached response repeated collection logs")
+	}
+}
+
+func TestDeploymentUsageAggregations(t *testing.T) {
+	if aggregatePodUsage(nil) != nil {
+		t.Fatal("missing pods must not produce zero-valued aggregates")
+	}
+	values := aggregatePodUsage([]usage{{CPU: 100, Memory: 900}, {CPU: 300, Memory: 100}, {CPU: 0, Memory: 500}})
+	for name, expected := range map[string]usage{"sum": {CPU: 400, Memory: 1500}, "avg": {CPU: 400.0 / 3, Memory: 500}, "min": {CPU: 0, Memory: 100}, "max": {CPU: 300, Memory: 900}} {
+		if *values[name] != expected {
+			t.Errorf("%s = %+v, want %+v", name, values[name], expected)
+		}
+	}
+	m, _ := metricsFixture(t)
+	snapshot, err := m.snapshot(context.Background(), "ctx", "deployments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment := snapshot.Items["deployment"]
+	if deployment.Aggregations["sum"].CPU != 250 || deployment.Aggregations["avg"].CPU != 125 || deployment.History[0].Aggregations["avg"].CPU != 125 {
+		t.Fatalf("aggregates not retained in deployment history: %+v", deployment)
+	}
+	e := &metricsEntry{histories: map[string][]metricPoint{}}
+	incomplete := &workloadMetrics{UID: "deployment", Usage: values["sum"], Aggregations: values, Reporting: 1, Expected: 2}
+	e.record(incomplete, time.Now())
+	if incomplete.History[0].Aggregations != nil || incomplete.History[0].Usage != nil {
+		t.Fatal("incomplete aggregates should remain chart gaps")
+	}
+}
+
+func TestDeploymentHistoryTracksAsynchronousPodSamples(t *testing.T) {
+	m, client := metricsFixture(t)
+	ctx := context.Background()
+	rs, err := client.Resource(supportedResources["replicasets"]).Namespace("test").Get(ctx, "unrelated-rs", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metricOwner(rs, "Deployment", "deployment")
+	if _, err = client.Resource(supportedResources["replicasets"]).Namespace("test").Update(ctx, rs, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := m.snapshot(ctx, "ctx", "deployments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, cpu := range map[string]string{"new": "200m", "unrelated": "50m"} {
+		metric, getErr := client.Resource(podMetricsGVR).Namespace("test").Get(ctx, name, metav1.GetOptions{})
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		metric.Object["timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
+		metric.Object["containers"] = []interface{}{map[string]interface{}{"name": "app", "usage": map[string]interface{}{"cpu": cpu, "memory": "128Mi"}}}
+		if _, err = client.Resource(podMetricsGVR).Namespace("test").Update(ctx, metric, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.entries["ctx"].polled = time.Now().Add(-metricsInterval)
+	second, err := m.snapshot(ctx, "ctx", "deployments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, after := first.Items["deployment"], second.Items["deployment"]
+	if before.Updated != after.Updated || before.Usage.CPU != after.Usage.CPU {
+		t.Fatal("fixture should retain oldest timestamp and total CPU")
+	}
+	if len(after.History) != 2 || after.History[1].Aggregations["min"].CPU != 50 || after.History[1].Aggregations["max"].CPU != 200 {
+		t.Fatalf("changed extrema lost from history: %+v", after.History)
+	}
+	m.entries["ctx"].polled = time.Now().Add(-metricsInterval)
+	repeated, err := m.snapshot(ctx, "ctx", "deployments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repeated.Items["deployment"].History) != 2 {
+		t.Fatal("identical pod sample sets created duplicate history")
+	}
+}
+
+func TestMetricsRefreshRunsTwoBoundedPairsAcrossSubscribers(t *testing.T) {
+	started := make(chan string, 4)
+	podPair, ownerPair := make(chan struct{}), make(chan struct{})
+	var mu sync.Mutex
+	active, maximum, total := 0, 0, 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		active++
+		total++
+		maximum = max(maximum, active)
+		mu.Unlock()
+		defer func() { mu.Lock(); active--; mu.Unlock() }()
+		select {
+		case started <- r.URL.Path:
+		case <-r.Context().Done():
+			return
+		}
+		release := ownerPair
+		if !strings.HasPrefix(r.URL.Path, "/apis/apps/") {
+			release = podPair
+		}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"apiVersion":"v1","kind":"List","items":[]}`))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &MetricsManager{entries: map[string]*metricsEntry{}, newClient: func(string) (dynamic.Interface, string, error) { return client, "test", nil }}
+	completed := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		go func() { _, requestErr := m.snapshot(ctx, "ctx", "deployments"); completed <- requestErr }()
+	}
+	waitForPair := func(owner bool) {
+		t.Helper()
+		paths := make(map[string]bool)
+		for i := 0; i < 2; i++ {
+			select {
+			case path := <-started:
+				if strings.HasPrefix(path, "/apis/apps/") != owner || !strings.Contains(path, "/namespaces/test/") {
+					t.Fatalf("unexpected request in pair: %s", path)
+				}
+				paths[path] = true
+			case <-ctx.Done():
+				t.Fatal("independent API requests did not overlap")
+			}
+		}
+		if len(paths) != 2 {
+			t.Fatalf("pair duplicated an endpoint: %v", paths)
+		}
+		select {
+		case path := <-started:
+			t.Fatalf("more than two API requests started: %s", path)
+		default:
+		}
+	}
+	waitForPair(false)
+	close(podPair)
+	waitForPair(true)
+	close(ownerPair)
+	for i := 0; i < 8; i++ {
+		select {
+		case err = <-completed:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal("shared subscribers did not complete")
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if maximum != 2 || total != 4 {
+		t.Fatalf("maximum concurrency=%d, total requests=%d; want two concurrent requests and four total across eight subscribers", maximum, total)
+	}
+}

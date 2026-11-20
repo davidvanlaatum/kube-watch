@@ -148,12 +148,15 @@ tr:hover .copy-name {
 .yaml-editor {
   min-height: 0;
 }
+.details-panel-metrics:not(.details-panel-maximized) .details-content,
 .details-panel-yaml:not(.details-panel-maximized) .details-content {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
 }
+.details-panel-metrics:not(.details-panel-maximized) .details-header,
+.details-panel-metrics:not(.details-panel-maximized) .details-content > .MuiTabs-root,
 .details-panel-yaml:not(.details-panel-maximized) .details-header,
 .details-panel-yaml:not(.details-panel-maximized) .details-content > .MuiTabs-root {
   flex: 0 0 auto;

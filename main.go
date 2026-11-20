@@ -134,6 +134,7 @@ func main() {
 // newHTTPHandler builds the same routes for the local server and HTTP tests.
 func newHTTPHandler(contexts []map[string]string, wm *WatchManager, hm *HelmManager, lm *LogManager, vc *versionChecker, distFS fs.FS) http.Handler {
 	mux := http.NewServeMux()
+	mux.Handle("/api/metrics/", NewMetricsManager(wm.loadingRules))
 	fileServer := http.FileServer(http.FS(distFS))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(r.URL.Path, "/")
