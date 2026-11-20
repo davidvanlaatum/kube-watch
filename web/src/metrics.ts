@@ -30,3 +30,23 @@ export function formatUsage(value: number | undefined, metric: keyof Usage) {
 export function coverage(w: WorkloadMetrics, deployment: boolean) {
   return `${w.reporting} of ${w.expected} ${deployment ? 'pods' : 'containers'} reporting`
 }
+
+function allocationComplete(workload: WorkloadMetrics, field: 'requests' | 'limits', metric: keyof Usage, snapshot: MetricsSnapshot): boolean {
+  if (workload.containers) {
+    return workload.containers.length > 0 && workload.containers.length === workload.expected && workload.containers.every(container => container[field][metric] > 0)
+  }
+  const pods = (workload.pods || []).map(uid => snapshot.pods?.[uid])
+  return pods.length > 0 && pods.length === workload.expected && pods.every(pod => pod && allocationComplete(pod, field, metric, snapshot))
+}
+
+export function allocationLabel(workload: WorkloadMetrics, metric: keyof Usage, snapshot: MetricsSnapshot) {
+  const completeLimit = allocationComplete(workload, 'limits', metric, snapshot)
+  const completeRequest = allocationComplete(workload, 'requests', metric, snapshot)
+  const field = completeLimit ? 'limits' : completeRequest ? 'requests' : workload.limits[metric] > 0 ? 'limits' : 'requests'
+  const value = workload[field][metric]
+  if (!value) return ' · no request/limit'
+  const complete = field === 'limits' ? completeLimit : completeRequest
+  const percentage = complete && workload.usage && workload.reporting === workload.expected
+    ? ` (${Number((workload.usage[metric] / value * 100).toFixed(1))}%)` : ''
+  return ` / ${formatUsage(value, metric)} ${complete ? '' : 'partial '}${field === 'limits' ? 'limit' : 'request'}${percentage}`
+}

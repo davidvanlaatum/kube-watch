@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -365,5 +367,60 @@ func TestMetricsCancellationDoesNotPoisonSharedCache(t *testing.T) {
 				t.Fatal("cancellation created an artificial gap")
 			}
 		})
+	}
+}
+
+func TestMetricsRequestFailureDiagnostics(t *testing.T) {
+	var logs bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(original) })
+	m, _ := metricsFixture(t)
+	m.newClient = func(string) (dynamic.Interface, string, error) {
+		return nil, "", errors.New("credential provider unavailable")
+	}
+	response := httptest.NewRecorder()
+	m.ServeHTTP(response, httptest.NewRequest("GET", "/api/metrics/prod/deployments", nil))
+	if response.Code != 502 || !strings.Contains(response.Body.String(), "credential provider unavailable") {
+		t.Fatalf("missing response detail: %d %s", response.Code, response.Body.String())
+	}
+	for _, detail := range []string{`"level":"ERROR"`, `"msg":"metrics request failed"`, `"cluster":"prod"`, `"resource":"deployments"`, `"duration":`, `"error":"credential provider unavailable"`} {
+		if !strings.Contains(logs.String(), detail) {
+			t.Errorf("missing %s in log: %s", detail, logs.String())
+		}
+	}
+	logs.Reset()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/metrics/prod/deployments", nil).WithContext(ctx))
+	if logs.Len() != 0 {
+		t.Fatalf("ordinary cancellation logged as failure: %s", logs.String())
+	}
+}
+
+func TestMetricsCollectionFailuresLogOncePerCollection(t *testing.T) {
+	var logs bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(original) })
+	m, client := metricsFixture(t)
+	client.PrependReactor("list", "*", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if action.GetResource() == podMetricsGVR || action.GetResource() == supportedResources["replicasets"] {
+			return true, nil, errors.New("fixture permission denied")
+		}
+		return false, nil, nil
+	})
+	if _, err := m.snapshot(context.Background(), "prod", "deployments"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), `"msg":"pod metrics unavailable"`) || !strings.Contains(logs.String(), `"msg":"deployment metrics unavailable"`) || !strings.Contains(logs.String(), `"namespace":"test"`) || !strings.Contains(logs.String(), "fixture permission denied") {
+		t.Fatalf("missing collection diagnostics: %s", logs.String())
+	}
+	before := logs.String()
+	if _, err := m.snapshot(context.Background(), "prod", "deployments"); err != nil {
+		t.Fatal(err)
+	}
+	if logs.String() != before {
+		t.Fatal("cached response repeated collection logs")
 	}
 }

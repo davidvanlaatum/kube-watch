@@ -496,7 +496,7 @@ test('keeps sparklines beside values when columns have room and wraps them when 
   await expect(row).toContainText('125m')
   const cells = [row.getByRole('cell').filter({ has: page.getByText('125m', { exact: true }) }), row.getByRole('cell').filter({ has: page.getByText('128 MiB', { exact: true }) })]
   for (const cell of cells) {
-    const value = await cell.locator('span').boundingBox()
+    const value = await cell.locator('span').first().locator('..').boundingBox()
     const graph = await cell.getByRole('img').boundingBox()
     expect(value).not.toBeNull()
     expect(graph).not.toBeNull()
@@ -506,9 +506,30 @@ test('keeps sparklines beside values when columns have room and wraps them when 
   await page.setViewportSize({ width: 720, height: 900 })
   for (const cell of cells) {
     await expect.poll(async () => {
-      const value = await cell.locator('span').boundingBox()
+      const value = await cell.locator('span').first().locator('..').boundingBox()
       const graph = await cell.getByRole('img').boundingBox()
       return graph!.y >= value!.y + value!.height
     }).toBe(true)
   }
+})
+
+test('shows the backend failure reason when a metrics request returns 502', async ({ page }) => {
+  const warnings: string[] = []
+  page.on('console', message => { if (message.type() === 'warning') warnings.push(message.text()) })
+  await page.route('**/api/metrics/dev/pods', route => route.fulfill({ status: 502, contentType: 'text/plain', body: 'metrics unavailable: collect pod metrics: context deadline exceeded\n' }))
+  await page.goto('/view/dev/pods')
+  await expect(page.getByText('Metrics request failed (502): metrics unavailable: collect pod metrics: context deadline exceeded')).toBeVisible()
+  await expect(page.getByRole('row', { name: /api-7d9f/ })).toBeVisible()
+  expect(warnings.some(message => message.includes('metrics request failed'))).toBe(true)
+})
+
+test('compares list usage to a limit or falls back to the request', async ({ page }) => {
+  const usage = workloadMetrics('pod-1', pod.metadata.name)
+  usage.limits.cpu = 0
+  usage.containers[0].limits.cpu = 0
+  await page.route('**/api/metrics/dev/pods', route => route.fulfill({ json: { time: metricsNow, items: { 'pod-1': usage }, pods: { 'pod-1': usage } } }))
+  await page.goto('/view/dev/pods')
+  const row = page.getByRole('row', { name: /api-7d9f/ })
+  await expect(row).toContainText('/ 100m request (125%)')
+  await expect(row).toContainText('/ 256 MiB limit (50%)')
 })

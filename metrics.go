@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -130,7 +131,10 @@ func (m *MetricsManager) snapshot(ctx context.Context, cluster, kind string) (me
 			// A cancelled browser request must not poison the shared cache.
 			e.polled = time.Time{}
 			e.deploymentPolled = time.Time{}
-			return metricsSnapshot{}, err
+			return metricsSnapshot{}, fmt.Errorf("collect pod metrics: %w", err)
+		}
+		if e.err != "" {
+			slog.Warn("pod metrics unavailable", "cluster", cluster, "namespace", e.namespace, "error", e.err)
 		}
 		e.polled = now
 		for key, points := range e.histories {
@@ -150,7 +154,10 @@ func (m *MetricsManager) snapshot(ctx context.Context, cluster, kind string) (me
 			e.refreshDeployments(ctx, now)
 			if err := ctx.Err(); err != nil {
 				e.deploymentPolled = time.Time{}
-				return metricsSnapshot{}, err
+				return metricsSnapshot{}, fmt.Errorf("resolve deployment metrics: %w", err)
+			}
+			if e.deploymentErr != "" {
+				slog.Warn("deployment metrics unavailable", "cluster", cluster, "namespace", e.namespace, "error", e.deploymentErr)
 			}
 			e.deploymentPolled = e.polled
 		}
@@ -382,6 +389,7 @@ func (m *MetricsManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unsupported metrics resource", http.StatusBadRequest)
 		return
 	}
+	started := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
 	snapshot, err := m.snapshot(ctx, cluster, kind)
@@ -389,6 +397,7 @@ func (m *MetricsManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() != nil {
 			return
 		}
+		slog.Error("metrics request failed", "cluster", cluster, "resource", kind, "duration", time.Since(started), "error", err)
 		http.Error(w, fmt.Sprintf("metrics unavailable: %v", err), http.StatusBadGateway)
 		return
 	}

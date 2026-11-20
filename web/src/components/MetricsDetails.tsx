@@ -1,5 +1,5 @@
 import { Alert, Box, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material'
-import { coverage, formatUsage, type ContainerMetrics, type MetricsSnapshot, type WorkloadMetrics, type Usage } from '../metrics'
+import { allocationLabel, coverage, formatUsage, type ContainerMetrics, type MetricsSnapshot, type WorkloadMetrics, type Usage } from '../metrics'
 import type { Column } from '../types'
 import { UsageChart } from './UsageChart'
 
@@ -10,7 +10,10 @@ export function metricColumns(snapshot?: MetricsSnapshot): Column[] {
     value: object => {
       const w = snapshot?.items?.[object.metadata?.uid]
       return <Stack direction="row" sx={{ flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 0.75 }} title={w ? coverage(w, object.kind === 'Deployment') : 'Metrics unavailable'}>
-        <span style={{ whiteSpace: 'nowrap' }}>{formatUsage(w?.usage?.[metric], metric)}{w && w.reporting < w.expected && w.usage ? ' *' : ''}</span>
+        <Box sx={{ whiteSpace: 'nowrap' }}>
+          <span>{formatUsage(w?.usage?.[metric], metric)}{w && w.reporting < w.expected && w.usage ? ' *' : ''}</span>
+          {w && snapshot && <Typography component="span" variant="caption" color="text.secondary">{allocationLabel(w, metric, snapshot)}</Typography>}
+        </Box>
         {w && snapshot && <UsageChart points={w.history} metric={metric} now={snapshot.time} compact />}
       </Stack>
     },

@@ -80,7 +80,7 @@ export function ResourceTable({
                   return next
                 })}
               >
-                {columns.map(column => <TableCell key={column.id} align={column.align}>{column.value(item)}</TableCell>)}
+                {columns.map(column => <TableCell key={column.id} align={column.align} sx={column.id === 'name' ? { whiteSpace: 'nowrap' } : undefined}>{column.value(item)}</TableCell>)}
               </TableRow>
             )
           })}

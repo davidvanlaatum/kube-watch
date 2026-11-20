@@ -13,11 +13,17 @@ export function useMetrics(ctx: string, resource: string) {
     const poll = async () => {
       try {
         const response = await fetch(`/api/metrics/${encodeURIComponent(ctx)}/${resource}`, { signal: controller.signal })
-        if (!response.ok) throw new Error(`Metrics request failed (${response.status})`)
+        if (!response.ok) {
+          const details = (await response.text()).trim()
+          throw new Error(`Metrics request failed (${response.status})${details ? `: ${details}` : ''}`)
+        }
         const snapshot: MetricsSnapshot = await response.json()
         if (!disposed) setState({ key, snapshot, error: snapshot.error })
       } catch (error) {
-        if (!disposed) setState({ key, error: error instanceof Error ? error.message : 'Metrics unavailable' })
+        if (!disposed) {
+          console.warn('metrics request failed', { context: ctx, resource, error })
+          setState({ key, error: error instanceof Error ? error.message : 'Metrics unavailable' })
+        }
       } finally {
         if (!disposed) timer = setTimeout(poll, 15_000)
       }

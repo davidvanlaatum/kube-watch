@@ -4,6 +4,15 @@ import { useMetrics } from './useMetrics'
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
 describe('metrics polling', () => {
+  it('preserves backend error details in the UI and browser console', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 502, text: async () => 'metrics unavailable: resolve deployment metrics: context deadline exceeded\n' }))
+    const { result } = renderHook(() => useMetrics('dev', 'deployments'))
+    await act(async () => {})
+    expect(result.current.error).toBe('Metrics request failed (502): metrics unavailable: resolve deployment metrics: context deadline exceeded')
+    expect(warn).toHaveBeenCalledWith('metrics request failed', expect.objectContaining({ context: 'dev', resource: 'deployments', error: expect.any(Error) }))
+    warn.mockRestore()
+  })
   it('polls once per view, clears failures on recovery and aborts on navigation', async () => {
     vi.useFakeTimers()
     const snapshot = { time: 123, items: {}, pods: {} }
@@ -13,7 +22,7 @@ describe('metrics polling', () => {
     await act(async () => {})
     expect(fetchMock.mock.calls[0][0]).toBe('/api/metrics/dev%2Fa/pods')
     expect(result.current.snapshot).toEqual(snapshot)
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 403 })
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 403, text: async () => '' })
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
     expect(result.current.error).toContain('403')
     expect(result.current.snapshot).toBeUndefined()
