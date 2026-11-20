@@ -308,7 +308,7 @@ func streamPodLogs(ctx context.Context, client kubernetes.Interface, pod *corev1
 		lines, err := readContainerLogs(ctx, client, pod.Namespace, pod.Name, container, tailLines)
 		if err != nil {
 			slog.Warn("failed to read initial container logs", "namespace", pod.Namespace, "pod", pod.Name, "container", container, "error", err)
-			sendLogError(ctx, out, fmt.Sprintf("%s/%s initial logs failed: %v", pod.Name, container, err))
+			sendContainerLogError(ctx, out, pod.Name, container, fmt.Sprintf("%s/%s initial logs failed: %v", pod.Name, container, err))
 			continue
 		}
 		initial = append(initial, lines...)
@@ -363,7 +363,7 @@ func followContainerLogs(ctx context.Context, client kubernetes.Interface, names
 		if err != nil {
 			if ctx.Err() == nil {
 				slog.Warn("failed to follow container logs", "namespace", namespace, "pod", podName, "container", container, "error", err)
-				sendLogError(ctx, out, fmt.Sprintf("%s/%s follow logs failed: %v", podName, container, err))
+				sendContainerLogError(ctx, out, podName, container, fmt.Sprintf("%s/%s follow logs failed: %v", podName, container, err))
 				if apierrors.IsNotFound(err) {
 					return
 				}
@@ -374,6 +374,11 @@ func followContainerLogs(ctx context.Context, client kubernetes.Interface, names
 			continue
 		}
 
+		sendLogEnvelope(ctx, out, logEnvelope{
+			Type: "INFO", Pod: podName, Container: container,
+			Info: fmt.Sprintf("following logs for %s/%s", podName, container),
+		})
+
 		lastSeen, err := scanFollowLogStream(ctx, stream, podName, container, out)
 		if closeErr := stream.Close(); closeErr != nil && err == nil {
 			err = closeErr
@@ -383,7 +388,7 @@ func followContainerLogs(ctx context.Context, client kubernetes.Interface, names
 		}
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("container log stream ended with scanner error", "namespace", namespace, "pod", podName, "container", container, "error", err)
-			sendLogError(ctx, out, fmt.Sprintf("%s/%s log stream error: %v", podName, container, err))
+			sendContainerLogError(ctx, out, podName, container, fmt.Sprintf("%s/%s log stream error: %v", podName, container, err))
 		}
 		if !sleepOrDone(ctx, time.Second) {
 			return
@@ -529,6 +534,10 @@ func sendLogLine(ctx context.Context, out chan<- []byte, line logLine) {
 
 func sendLogError(ctx context.Context, out chan<- []byte, message string) {
 	sendLogEnvelope(ctx, out, logEnvelope{Type: "ERROR", Error: message})
+}
+
+func sendContainerLogError(ctx context.Context, out chan<- []byte, pod, container, message string) {
+	sendLogEnvelope(ctx, out, logEnvelope{Type: "ERROR", Pod: pod, Container: container, Error: message})
 }
 
 func sendLogInfo(ctx context.Context, out chan<- []byte, message string) {
