@@ -24,6 +24,10 @@ import (
 const metricsInterval = 15 * time.Second
 const metricsRetention = 15 * time.Minute
 const metricsFreshness = time.Minute
+const metricsAPITimeout = 10 * time.Second
+
+// Include setup and waiting for a shared refresh, in addition to two pairs of API calls.
+const metricsRequestTimeout = 4*metricsAPITimeout + 5*time.Second
 
 var podMetricsGVR = schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "pods"}
 
@@ -94,7 +98,7 @@ func NewMetricsManager(rules *clientcmd.ClientConfigLoadingRules) *MetricsManage
 		if err != nil {
 			return nil, "", err
 		}
-		rest.Timeout = 10 * time.Second
+		rest.Timeout = metricsAPITimeout
 		ns, _, err := cfg.Namespace()
 		if err != nil {
 			return nil, "", err
@@ -133,12 +137,13 @@ func (m *MetricsManager) snapshot(ctx context.Context, cluster, kind string) (me
 		return metricsSnapshot{}, err
 	}
 	if now.Sub(e.polled) >= metricsInterval {
+		phaseStarted := time.Now()
 		e.refreshPods(ctx, now)
 		if err := ctx.Err(); err != nil {
 			// A cancelled browser request must not poison the shared cache.
 			e.polled = time.Time{}
 			e.deploymentPolled = time.Time{}
-			return metricsSnapshot{}, fmt.Errorf("collect pod metrics: %w", err)
+			return metricsSnapshot{}, fmt.Errorf("collect pod metrics after %s: %w", time.Since(phaseStarted).Round(time.Millisecond), err)
 		}
 		if e.err != "" {
 			slog.Warn("pod metrics unavailable", "cluster", cluster, "namespace", e.namespace, "error", e.err)
@@ -158,10 +163,11 @@ func (m *MetricsManager) snapshot(ctx context.Context, cluster, kind string) (me
 	items, message := e.pods, e.err
 	if kind == "deployments" {
 		if e.deploymentPolled.Before(e.polled) {
+			phaseStarted := time.Now()
 			e.refreshDeployments(ctx, now)
 			if err := ctx.Err(); err != nil {
 				e.deploymentPolled = time.Time{}
-				return metricsSnapshot{}, fmt.Errorf("resolve deployment metrics: %w", err)
+				return metricsSnapshot{}, fmt.Errorf("resolve deployment metrics after %s: %w", time.Since(phaseStarted).Round(time.Millisecond), err)
 			}
 			if e.deploymentErr != "" {
 				slog.Warn("deployment metrics unavailable", "cluster", cluster, "namespace", e.namespace, "error", e.deploymentErr)
@@ -213,29 +219,37 @@ func (e *metricsEntry) record(w *workloadMetrics, now time.Time) {
 
 func (e *metricsEntry) refreshPods(ctx context.Context, now time.Time) {
 	e.err = ""
-	pods, err := e.client.Resource(supportedResources["pods"]).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
+	var pods, metrics *unstructured.UnstructuredList
+	var podErr, metricErr error
+	var requests sync.WaitGroup
+	requests.Add(2)
+	go func() {
+		defer requests.Done()
+		pods, podErr = e.client.Resource(supportedResources["pods"]).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
+	}()
+	go func() {
+		defer requests.Done()
+		metrics, metricErr = e.client.Resource(podMetricsGVR).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
+		if apierrors.IsNotFound(metricErr) {
+			stable := podMetricsGVR
+			stable.Version = "v1"
+			metrics, metricErr = e.client.Resource(stable).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
+		}
+	}()
+	requests.Wait()
 	if ctx.Err() != nil {
 		return
 	}
-	if err != nil {
-		e.err = fmt.Sprintf("Cannot read pods for metrics: %v", err)
+	if podErr != nil {
+		e.err = fmt.Sprintf("Cannot read pods for metrics: %v", podErr)
 		e.pods = nil
 		e.podObjects = nil
 		return
 	}
-	metrics, err := e.client.Resource(podMetricsGVR).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
-	if apierrors.IsNotFound(err) {
-		stable := podMetricsGVR
-		stable.Version = "v1"
-		metrics, err = e.client.Resource(stable).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
-	}
-	if ctx.Err() != nil {
-		return
-	}
 	e.podObjects = pods.Items
 	byName := make(map[string]unstructured.Unstructured)
-	if err != nil {
-		e.err = fmt.Sprintf("CPU/memory metrics unavailable (Metrics API and pods.metrics.k8s.io list permission are required): %v", err)
+	if metricErr != nil {
+		e.err = fmt.Sprintf("CPU/memory metrics unavailable (Metrics API and pods.metrics.k8s.io list permission are required): %v", metricErr)
 	} else {
 		for _, item := range metrics.Items {
 			byName[item.GetName()] = item
@@ -306,20 +320,28 @@ func (e *metricsEntry) refreshPods(ctx context.Context, now time.Time) {
 func (e *metricsEntry) refreshDeployments(ctx context.Context, now time.Time) {
 	e.deploymentErr = ""
 	e.deployments = nil
-	replicas, err := e.client.Resource(supportedResources["replicasets"]).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
+	var replicas, deployments *unstructured.UnstructuredList
+	var replicaErr, deploymentErr error
+	var requests sync.WaitGroup
+	requests.Add(2)
+	go func() {
+		defer requests.Done()
+		replicas, replicaErr = e.client.Resource(supportedResources["replicasets"]).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
+	}()
+	go func() {
+		defer requests.Done()
+		deployments, deploymentErr = e.client.Resource(supportedResources["deployments"]).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
+	}()
+	requests.Wait()
 	if ctx.Err() != nil {
 		return
 	}
-	if err != nil {
-		e.deploymentErr = fmt.Sprintf("Cannot resolve deployment metrics: %v", err)
+	if replicaErr != nil {
+		e.deploymentErr = fmt.Sprintf("Cannot resolve deployment metrics: %v", replicaErr)
 		return
 	}
-	deployments, err := e.client.Resource(supportedResources["deployments"]).Namespace(e.namespace).List(ctx, metav1.ListOptions{})
-	if ctx.Err() != nil {
-		return
-	}
-	if err != nil {
-		e.deploymentErr = fmt.Sprintf("Cannot read deployments for metrics: %v", err)
+	if deploymentErr != nil {
+		e.deploymentErr = fmt.Sprintf("Cannot read deployments for metrics: %v", deploymentErr)
 		return
 	}
 	owners := make(map[string]string)
@@ -426,7 +448,7 @@ func (m *MetricsManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started := time.Now()
-	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), metricsRequestTimeout)
 	defer cancel()
 	snapshot, err := m.snapshot(ctx, cluster, kind)
 	if err != nil {

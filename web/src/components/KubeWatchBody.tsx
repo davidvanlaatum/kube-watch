@@ -27,7 +27,7 @@ type KubeWatchBodyProps = {
 
 export function KubeWatchBody({ ctx, resource }: KubeWatchBodyProps) {
   const [filters, setFilters] = useState<TableFilters>(emptyFilters)
-  const [aggregation, setAggregation] = useState<Aggregation>('sum')
+  const [aggregation, setAggregation] = useState<Aggregation>('avg')
   const [sort, setSort] = useState<SortState>(null)
   const [logTailLines, setLogTailLines] = useState(200)
   const mainRef = useRef<HTMLElement | null>(null)

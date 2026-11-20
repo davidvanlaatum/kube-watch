@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/rest"
 	ktesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
@@ -288,8 +290,15 @@ func TestMetricsStableAPIFallback(t *testing.T) {
 	if err != nil || s.Error != "" {
 		t.Fatalf("fallback: %+v %v", s, err)
 	}
-	actions := client.Actions()
-	if actions[len(actions)-1].GetResource().Version != "v1" {
+	stable := podMetricsGVR
+	stable.Version = "v1"
+	found := false
+	for _, action := range client.Actions() {
+		if action.GetResource() == stable {
+			found = true
+		}
+	}
+	if !found {
 		t.Fatal("stable API not attempted")
 	}
 }
@@ -497,5 +506,90 @@ func TestDeploymentHistoryTracksAsynchronousPodSamples(t *testing.T) {
 	}
 	if len(repeated.Items["deployment"].History) != 2 {
 		t.Fatal("identical pod sample sets created duplicate history")
+	}
+}
+
+func TestMetricsRefreshRunsTwoBoundedPairsAcrossSubscribers(t *testing.T) {
+	started := make(chan string, 4)
+	podPair, ownerPair := make(chan struct{}), make(chan struct{})
+	var mu sync.Mutex
+	active, maximum, total := 0, 0, 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		active++
+		total++
+		maximum = max(maximum, active)
+		mu.Unlock()
+		defer func() { mu.Lock(); active--; mu.Unlock() }()
+		select {
+		case started <- r.URL.Path:
+		case <-r.Context().Done():
+			return
+		}
+		release := ownerPair
+		if !strings.HasPrefix(r.URL.Path, "/apis/apps/") {
+			release = podPair
+		}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"apiVersion":"v1","kind":"List","items":[]}`))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &MetricsManager{entries: map[string]*metricsEntry{}, newClient: func(string) (dynamic.Interface, string, error) { return client, "test", nil }}
+	completed := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		go func() { _, requestErr := m.snapshot(ctx, "ctx", "deployments"); completed <- requestErr }()
+	}
+	waitForPair := func(owner bool) {
+		t.Helper()
+		paths := make(map[string]bool)
+		for i := 0; i < 2; i++ {
+			select {
+			case path := <-started:
+				if strings.HasPrefix(path, "/apis/apps/") != owner || !strings.Contains(path, "/namespaces/test/") {
+					t.Fatalf("unexpected request in pair: %s", path)
+				}
+				paths[path] = true
+			case <-ctx.Done():
+				t.Fatal("independent API requests did not overlap")
+			}
+		}
+		if len(paths) != 2 {
+			t.Fatalf("pair duplicated an endpoint: %v", paths)
+		}
+		select {
+		case path := <-started:
+			t.Fatalf("more than two API requests started: %s", path)
+		default:
+		}
+	}
+	waitForPair(false)
+	close(podPair)
+	waitForPair(true)
+	close(ownerPair)
+	for i := 0; i < 8; i++ {
+		select {
+		case err = <-completed:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal("shared subscribers did not complete")
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if maximum != 2 || total != 4 {
+		t.Fatalf("maximum concurrency=%d, total requests=%d; want two concurrent requests and four total across eight subscribers", maximum, total)
 	}
 }

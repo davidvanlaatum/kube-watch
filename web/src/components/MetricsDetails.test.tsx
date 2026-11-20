@@ -129,7 +129,9 @@ describe('deployment aggregations', () => {
     const column = metricColumns(data, 'max')[0]
     expect(column.header).toBe('CPU (MAX)')
     expect(column.sortValue?.({ metadata: { uid: 'deployment' } })).toBe(300)
-    render(<MetricsDetails workload={deployment} snapshot={data} deployment aggregation="max" />)
+    const { rerender } = render(<MetricsDetails workload={deployment} snapshot={data} deployment />)
+    expect(screen.getByText('CPU (Average): 200m')).toBeInTheDocument()
+    rerender(<MetricsDetails workload={deployment} snapshot={data} deployment aggregation="max" />)
     expect(screen.getByText('CPU (Maximum): 300m')).toBeInTheDocument()
     expect(screen.getByText(/Maximum across reporting pods/)).toBeInTheDocument()
     expect(screen.getByText(/Allocation reference lines follow the current pod/)).toBeInTheDocument()

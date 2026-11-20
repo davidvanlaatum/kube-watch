@@ -468,7 +468,7 @@ test('shows deployment totals, per-pod averages, breakdown and incomplete covera
   const usage = workloadMetrics('deployment-1', 'web', 250)
   const deployment = { kind: 'Deployment', metadata: { uid: 'deployment-1', name: 'web', namespace: 'default' }, spec: { replicas: 2 }, status: { readyReplicas: 2 } }
   await page.route('**/sse/dev/deployments', route => route.fulfill({ contentType: 'text/event-stream', body: `data: ${JSON.stringify({ type: 'SNAPSHOT', objects: [deployment] })}\n\n` }))
-  await page.route('**/api/metrics/dev/deployments', route => route.fulfill({ json: { time: metricsNow, items: { 'deployment-1': { ...usage, reporting: 1, expected: 2, pods: ['pod-1'] } }, pods: { 'pod-1': workloadMetrics('pod-1', 'web-old') } } }))
+  await page.route('**/api/metrics/dev/deployments', route => route.fulfill({ json: { time: metricsNow, items: { 'deployment-1': { ...usage, aggregations: { sum: usage.usage, avg: usage.usage, min: usage.usage, max: usage.usage }, reporting: 1, expected: 2, pods: ['pod-1'] } }, pods: { 'pod-1': workloadMetrics('pod-1', 'web-old') } } }))
   await page.goto('/view/dev/deployments')
   const row = page.getByRole('row', { name: /web/ })
   await expect(row).toContainText('250m *')
@@ -551,15 +551,19 @@ test('switches deployment list and detail charts between pod aggregates without 
       return { time: metricsNow - (60 - i) * 15_000, usage: i === 30 ? null : readings.sum, aggregations: i === 30 ? undefined : readings }
     }),
   }
-  const deployment = { kind: 'Deployment', metadata: { uid: 'deployment-1', name: 'api', namespace: 'default' }, spec: { replicas: 2 }, status: { readyReplicas: 2 } }
+  const deployment = { kind: 'Deployment', metadata: { uid: 'deployment-1', name: 'api', namespace: 'default', creationTimestamp: '2026-07-07T23:00:00Z' }, spec: { replicas: 2 }, status: { readyReplicas: 2, updatedReplicas: 2, availableReplicas: 2 } }
   let requests = 0
   await page.route('**/api/metrics/dev/deployments', route => { requests++; return route.fulfill({ json: { time: metricsNow, items: { 'deployment-1': total }, pods: { a, b } } }) })
   await page.route('**/sse/dev/deployments', route => route.fulfill({ contentType: 'text/event-stream', body: `data: ${JSON.stringify({ type: 'SNAPSHOT', objects: [deployment] })}\n\n` }))
   await page.goto('/view/dev/deployments')
   const row = page.locator('.resource-table').getByRole('row', { name: /api/ })
-  await expect(row).toContainText('400m')
-  await expect(page.getByRole('columnheader', { name: /CPU \(SUM\)/ })).toBeVisible()
+  await expect(row).toContainText('200m')
+  await expect(page.getByRole('columnheader', { name: /CPU \(AVG\)/ })).toBeVisible()
+  await expect(page.getByRole('combobox', { name: 'Pod aggregation' })).toContainText('Average')
   await captureReadmeScreenshot(page, 'deployment-overview.png', screenshotTheme(testInfo), { x: 0, y: 0, width: 1280, height: 320 })
+  await page.getByRole('combobox', { name: 'Pod aggregation' }).click()
+  await page.getByRole('option', { name: 'Sum', exact: true }).click()
+  await expect(row).toContainText('400m')
   await page.getByRole('combobox', { name: 'Pod aggregation' }).click()
   await page.getByRole('option', { name: 'Average', exact: true }).click()
   await expect(row).toContainText('200m / 400m limit (50%)')
@@ -591,6 +595,9 @@ test('switches deployment list and detail charts between pod aggregates without 
   await page.getByRole('option', { name: 'Maximum', exact: true }).click()
   await expect(panel.getByText('CPU (Maximum): 300m')).toBeVisible()
   await page.mouse.move(0, 0)
+  await panel.getByRole('combobox', { name: 'Pod aggregation' }).click()
+  await page.getByRole('option', { name: 'Average', exact: true }).click()
+  await expect(panel.getByText('CPU (Average): 200m')).toBeVisible()
   await expect(page.getByRole('listbox', { includeHidden: true })).toHaveCount(0)
   await captureReadmeScreenshot(page, 'deployment-metrics.png', screenshotTheme(testInfo))
 })

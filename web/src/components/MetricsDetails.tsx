@@ -24,7 +24,7 @@ export function metricColumns(snapshot?: MetricsSnapshot, aggregation?: Aggregat
   }))
 }
 
-export function MetricsDetails({ workload: total, snapshot, deployment, error, aggregation = 'sum', onAggregationChange }: {
+export function MetricsDetails({ workload: total, snapshot, deployment, error, aggregation = 'avg', onAggregationChange }: {
   workload?: WorkloadMetrics; snapshot?: MetricsSnapshot; deployment: boolean; error?: string; aggregation?: Aggregation; onAggregationChange?: (value: Aggregation) => void
 }) {
   const workload = deployment ? withAggregation(total, aggregation) : total
